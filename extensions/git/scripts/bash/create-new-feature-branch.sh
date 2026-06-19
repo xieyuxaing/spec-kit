@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Git extension: create-new-feature.sh
-# Adapted from core scripts/bash/create-new-feature.sh for extension layout.
+# Git extension: create-new-feature-branch.sh
+# Creates a git feature branch only. The feature directory and spec file
+# are created by the core create-new-feature.sh script.
 # Sources common.sh from the project's installed scripts, falling back to
 # git-common.sh for minimal git helpers.
 
@@ -126,7 +127,7 @@ get_highest_from_specs() {
 
 # Function to get highest number from git branches
 get_highest_from_branches() {
-    git branch -a 2>/dev/null | sed 's/^[* ]*//; s|^remotes/[^/]*/||' | _extract_highest_number
+    git branch -a 2>/dev/null | sed -E 's/^[+*][[:space:]]+//; s/^[[:space:]]+//; s|^remotes/[^/]*/||' | _extract_highest_number
 }
 
 # Extract the highest sequential feature number from a list of ref names (one per line).
