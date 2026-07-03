@@ -197,7 +197,16 @@ if (-not $commonLoaded) {
     throw "Unable to locate common script file. Please ensure the Specify core scripts are installed."
 }
 
-# Resolve repository root
+# SPECIFY_INIT_DIR is resolved (and validated) by the core resolver. If only the
+# minimal git-common.ps1 was loaded, or an older core common.ps1 without the
+# resolver was loaded, refuse rather than silently falling back to the wrong root.
+if ($env:SPECIFY_INIT_DIR -and -not (Get-Command Resolve-SpecifyInitDir -CommandType Function -ErrorAction SilentlyContinue)) {
+    throw "SPECIFY_INIT_DIR requires updated Spec Kit core scripts (common.ps1 with Resolve-SpecifyInitDir), which were not found."
+}
+
+# Resolve repository root. When the core scripts are present, Get-RepoRoot
+# honors SPECIFY_INIT_DIR (the explicit project override for non-interactive /
+# CI use) and hard-fails on an invalid value with no silent fallback.
 if (Get-Command Get-RepoRoot -ErrorAction SilentlyContinue) {
     $repoRoot = Get-RepoRoot
 } elseif ($projectRoot) {
@@ -243,7 +252,11 @@ function Get-BranchName {
         if ($stopWords -contains $word) { continue }
         if ($word.Length -ge 3) {
             $meaningfulWords += $word
-        } elseif ($Description -match "\b$($word.ToUpper())\b") {
+        } elseif ($Description -cmatch "\b$($word.ToUpper())\b") {
+            # Case-sensitive (-cmatch) to mirror the bash twin's case-sensitive
+            # whole-word acronym match: keep a short word only when its UPPERCASE
+            # form appears in the original (an acronym). -match is case-insensitive
+            # and would keep every short word.
             $meaningfulWords += $word
         }
     }
@@ -388,8 +401,10 @@ if ($Json) {
     $obj = [PSCustomObject]@{
         BRANCH_NAME = $branchName
         FEATURE_NUM = $featureNum
-        HAS_GIT = $hasGit
     }
+    # $hasGit is computed for branch-creation logic only; it is intentionally not
+    # emitted so this output contract matches the bash twin: BRANCH_NAME and
+    # FEATURE_NUM, plus DRY_RUN (added just below) on dry runs.
     if ($DryRun) {
         $obj | Add-Member -NotePropertyName 'DRY_RUN' -NotePropertyValue $true
     }
@@ -397,7 +412,6 @@ if ($Json) {
 } else {
     Write-Output "BRANCH_NAME: $branchName"
     Write-Output "FEATURE_NUM: $featureNum"
-    Write-Output "HAS_GIT: $hasGit"
     if (-not $DryRun) {
         Write-Output "SPECIFY_FEATURE environment variable set to: $branchName"
     }
