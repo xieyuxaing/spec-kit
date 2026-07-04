@@ -55,13 +55,6 @@
   items:
     - name: Local Development
       href: local-development.md
-    - name: Source Learning
-      href: learning/README.md
-      items:
-        - name: Deep Learning Plan
-          href: learning/learning-plan.md
-        - name: Principles and Techniques
-          href: learning/spec-kit-principles-and-techniques.md
     - name: Evolving Specs
       href: guides/evolving-specs.md
     - name: Monorepos

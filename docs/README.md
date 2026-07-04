@@ -28,7 +28,6 @@ To build the documentation locally:
 - `toc.yml` - Table of contents configuration
 - `installation.md` - Installation guide
 - `quickstart.md` - Quick start guide
-- `learning/` - Chinese source-learning notes and study plan
 - `_site/` - Generated documentation output (ignored by git)
 
 ## Deployment
