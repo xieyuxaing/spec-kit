@@ -8,23 +8,23 @@
 
 ## 1. 总体心智模型
 
-Spec Kit 可以理解为四层东西叠在一起：
+Spec Kit 可以理解为五层东西叠在一起：
 
 1. **Spec-Driven Development 方法论层**
 
    它定义开发过程的阶段：先建立项目原则，再写需求规格，再做技术计划，再拆任务，最后实现。它关注的是“把模糊想法变成可执行的软件交付过程”。
-
 2. **Specify CLI 脚手架层**
 
    `specify` 是把方法论落地到项目目录里的工具。它负责初始化 `.specify/`，复制模板和脚本，安装 AI agent 命令文件，记录集成状态，管理 preset、extension、workflow。
-
 3. **模板与资产层**
 
    `templates/`、`scripts/`、`presets/`、`extensions/`、`workflows/` 是 Spec Kit 的可复制资产。CLI 本身不直接“生成需求内容”，它更多是把正确的模板、脚本和命令装进目标项目，让 AI agent 在项目中执行这些流程。
-
 4. **AI agent 集成层**
 
    不同 agent 的命令格式不同：有的是 Markdown 命令，有的是 TOML，有的是 YAML recipe，有的是 `SKILL.md` 目录。Spec Kit 用 integration registry 和若干 base class 把这些差异统一起来。
+5. **组合与分发层**
+
+   Bundles 把 extension、preset、workflow 和 step 组合成面向角色或团队的一键安装单元。它不新增运行时语义，而是负责解析、校验、安装和追踪这些已有组件。
 
 一个简化的图是：
 
@@ -41,6 +41,8 @@ specify CLI
   +-- 写入 agent context file：AGENTS.md、GEMINI.md、CLAUDE.md 等
   |
   +-- 记录状态：.specify/integration.json、manifest、registry
+  |
+  +-- 可选安装 bundle：组合 presets、extensions、workflows、steps
   |
   v
 AI agent 读取命令/技能文件
@@ -59,14 +61,14 @@ Spec-Driven Development 的关键不是“写更多文档”，而是把文档�
 
 典型工件包括：
 
-| 工件 | 典型位置 | 作用 |
-|---|---|---|
-| Constitution | `.specify/memory/constitution.md` | 项目原则、技术约束、团队规则 |
-| Specification | `specs/<feature>/spec.md` | 需求、用户场景、验收条件 |
-| Plan | `specs/<feature>/plan.md` | 技术方案、架构取舍、实施策略 |
-| Tasks | `specs/<feature>/tasks.md` | 可执行任务列表 |
-| Templates | `.specify/templates/*.md` | 生成上述工件时使用的模板 |
-| Scripts | `.specify/scripts/<sh|powershell>/*` | 查找 feature、检查前置条件、设置计划和任务 |
+| 工件          | 典型位置                            | 作用                         |
+| ------------- | ----------------------------------- | ---------------------------- |
+| Constitution  | `.specify/memory/constitution.md` | 项目原则、技术约束、团队规则 |
+| Specification | `specs/<feature>/spec.md`         | 需求、用户场景、验收条件     |
+| Plan          | `specs/<feature>/plan.md`         | 技术方案、架构取舍、实施策略 |
+| Tasks         | `specs/<feature>/tasks.md`        | 可执行任务列表               |
+| Templates     | `.specify/templates/*.md`         | 生成上述工件时使用的模板     |
+| Scripts       | `.specify/scripts/{bash,powershell}/*` | 查找 feature、检查前置条件、设置计划和任务 |
 
 这些工件之间有顺序关系：
 
@@ -103,6 +105,7 @@ constitution
 源码入口在：
 
 - `src/specify_cli/__init__.py`
+- `src/specify_cli/commands/init.py`
 - `src/specify_cli/shared_infra.py`
 - `src/specify_cli/integrations/__init__.py`
 - `src/specify_cli/integrations/base.py`
@@ -110,19 +113,19 @@ constitution
 
 ### 3.1 参数解析与入口
 
-CLI 使用 Typer 定义命令。`src/specify_cli/__init__.py` 中的 `app = typer.Typer(...)` 是总入口，`init()` 是初始化命令。
+CLI 使用 Typer 定义命令。`src/specify_cli/__init__.py` 中的 `app = typer.Typer(...)` 是总入口；`specify init` 的主体逻辑在 `src/specify_cli/commands/init.py`，通过 `register(app)` 挂到根命令上。
 
 关键参数可以按职责分组：
 
-| 参数 | 作用 |
-|---|---|
-| `project_name` / `--here` | 决定初始化到新目录还是当前目录 |
-| `--integration <key>` | 使用新的 integration 系统选择 agent |
-| `--integration-options` | 传给具体 integration 的额外参数 |
-| `--script sh|ps` | 选择 bash 或 PowerShell 脚本 |
-| `--preset <id>` | 初始化时安装 preset |
-| `--force` | 在已有目录或刷新 managed 文件时允许覆盖 |
-| `--ignore-agent-tools` | 跳过 CLI agent 工具检查 |
+| 参数                          | 作用                                    |
+| ----------------------------- | --------------------------------------- |
+| `project_name` / `--here` | 决定初始化到新目录还是当前目录          |
+| `--integration <key>`       | 使用新的 integration 系统选择 agent     |
+| `--integration-options`     | 传给具体 integration 的额外参数         |
+| `--script sh\|ps\|py`       | 选择脚本类型；以命令模板实际提供的 `scripts.<type>` 为准 |
+| `--preset <id>`             | 初始化时安装 preset                     |
+| `--force`                   | 在已有目录或刷新 managed 文件时允许覆盖 |
+| `--ignore-agent-tools`      | 跳过 CLI agent 工具检查                 |
 
 重要设计点：
 
@@ -225,7 +228,8 @@ src/specify_cli/integrations/
   gemini/
   goose/
   copilot/
-  windsurf/
+  firebender/
+  zcode/
 ```
 
 `_register_builtins()` 负责导入并注册这些类。这个函数要求 import 和 `_register()` 基本保持字母顺序，这降低冲突和 review 成本。
@@ -262,17 +266,17 @@ class GeminiIntegration(TomlIntegration):
 
 字段含义：
 
-| 字段 | 用途 |
-|---|---|
-| `key` | CLI 使用的集成标识。CLI 工具型 agent 应匹配真实命令名 |
-| `config["folder"]` | agent 根目录 |
-| `config["commands_subdir"]` | 命令或 skills 子目录 |
-| `config["requires_cli"]` | 是否需要检查本地 CLI 工具 |
-| `registrar_config["dir"]` | extension/preset 注册命令时使用的目标目录 |
-| `registrar_config["format"]` | 输出格式：markdown、toml、yaml 等 |
-| `registrar_config["args"]` | agent 接收用户参数的占位符 |
-| `registrar_config["extension"]` | 命令文件扩展名，skills 用 `/SKILL.md` |
-| `context_file` | 写入 Spec Kit managed section 的 agent 指令文件 |
+| 字段                              | 用途                                                  |
+| --------------------------------- | ----------------------------------------------------- |
+| `key`                           | CLI 使用的集成标识。CLI 工具型 agent 应匹配真实命令名 |
+| `config["folder"]`              | agent 根目录                                          |
+| `config["commands_subdir"]`     | 命令或 skills 子目录                                  |
+| `config["requires_cli"]`        | 是否需要检查本地 CLI 工具                             |
+| `registrar_config["dir"]`       | extension/preset 注册命令时使用的目标目录             |
+| `registrar_config["format"]`    | 输出格式：markdown、toml、yaml 等                     |
+| `registrar_config["args"]`      | agent 接收用户参数的占位符                            |
+| `registrar_config["extension"]` | 命令文件扩展名，skills 用 `/SKILL.md`               |
+| `context_file`                  | 写入 Spec Kit managed section 的 agent 指令文件       |
 
 `config` 偏向“agent 元数据和 init 安装位置”，`registrar_config` 偏向“后续 extension/preset 生成命令时怎么渲染”。
 
@@ -280,13 +284,13 @@ class GeminiIntegration(TomlIntegration):
 
 Integration 的基类决定了命令模板如何转换。
 
-| 基类 | 适合场景 | 输出 |
-|---|---|---|
-| `MarkdownIntegration` | 大多数 Markdown 命令 agent | `speckit.<name>.md` |
-| `TomlIntegration` | TOML prompt agent | `speckit.<name>.toml` |
-| `YamlIntegration` | YAML recipe agent | `speckit.<name>.yaml` |
-| `SkillsIntegration` | skills 目录型 agent | `speckit-<name>/SKILL.md` |
-| `IntegrationBase` | 完全自定义行为 | 自己决定 |
+| 基类                    | 适合场景                   | 输出                        |
+| ----------------------- | -------------------------- | --------------------------- |
+| `MarkdownIntegration` | 大多数 Markdown 命令 agent | `speckit.<name>.md`       |
+| `TomlIntegration`     | TOML prompt agent          | `speckit.<name>.toml`     |
+| `YamlIntegration`     | YAML recipe agent          | `speckit.<name>.yaml`     |
+| `SkillsIntegration`   | skills 目录型 agent        | `speckit-<name>/SKILL.md` |
+| `IntegrationBase`     | 完全自定义行为             | 自己决定                    |
 
 选择基类时不要先想“这个 agent 是谁”，而要想“这个 agent 的命令发现机制是什么格式”。
 
@@ -307,15 +311,15 @@ IntegrationBase.process_template()
 
 它会处理命令模板中的通用占位符：
 
-| 模板内容 | 处理结果 |
-|---|---|
-| frontmatter 的 `scripts.sh` 或 `scripts.ps` | 根据 `--script` 选出脚本命令 |
-| `{SCRIPT}` | 替换成对应脚本命令 |
-| `{ARGS}` / `$ARGUMENTS` | 替换成当前 agent 的参数占位符 |
-| `__AGENT__` | 替换成 integration key |
-| `__CONTEXT_FILE__` | 替换成当前 agent 的 context file |
-| `scripts/` / `templates/` 等路径 | 改写到 `.specify/scripts/`、`.specify/templates/` |
-| `__SPECKIT_COMMAND_*__` | 改写成 agent 对应的 slash command 调用 |
+| 模板内容                                        | 处理结果                                              |
+| ----------------------------------------------- | ----------------------------------------------------- |
+| frontmatter 的 `scripts.<script_type>` | 根据 `--script` 选出脚本命令                        |
+| `{SCRIPT}`                                    | 替换成对应脚本命令                                    |
+| `{ARGS}` / `$ARGUMENTS`                     | 替换成当前 agent 的参数占位符                         |
+| `__AGENT__`                                   | 替换成 integration key                                |
+| `__CONTEXT_FILE__`                            | 替换成当前 agent 的 context file                      |
+| `scripts/` / `templates/` 等路径            | 改写到 `.specify/scripts/`、`.specify/templates/` |
+| `__SPECKIT_COMMAND_*__`                       | 改写成 agent 对应的 slash command 调用                |
 
 这条流水线解释了为什么新 integration 多数时候不需要重写 `setup()`：只要 agent 的输出格式是标准 Markdown、TOML、YAML 或 skills，基类就能处理绝大多数差异。
 
@@ -323,13 +327,13 @@ IntegrationBase.process_template()
 
 `context_file` 通常是：
 
-| Agent | context file |
-|---|---|
-| Codex | `AGENTS.md` |
-| Claude | `CLAUDE.md` |
-| Gemini | `GEMINI.md` |
+| Agent   | context file                        |
+| ------- | ----------------------------------- |
+| Codex   | `AGENTS.md`                       |
+| Claude  | `CLAUDE.md`                       |
+| Gemini  | `GEMINI.md`                       |
 | Copilot | `.github/copilot-instructions.md` |
-| Cursor | `.cursor/rules/specify-rules.mdc` |
+| Cursor  | `.cursor/rules/specify-rules.mdc` |
 
 `IntegrationBase.upsert_context_section()` 会写入：
 
@@ -423,12 +427,12 @@ CommandRegistrar.AGENT_CONFIGS
 
 常见参数占位符：
 
-| Agent 类型 | 参数占位符 |
-|---|---|
-| 大多数 Markdown agent | `$ARGUMENTS` |
-| TOML/YAML agent | `{{args}}` |
-| Forge | `{{parameters}}` |
-| Skills agent | 通常仍从模板进入，再由 skills 语义处理 |
+| Agent 类型            | 参数占位符                             |
+| --------------------- | -------------------------------------- |
+| 大多数 Markdown agent | `$ARGUMENTS`                         |
+| TOML/YAML agent       | `{{args}}`                           |
+| Forge                 | `{{parameters}}`                     |
+| Skills agent          | 通常仍从模板进入，再由 skills 语义处理 |
 
 如果一个命令在某个 agent 中没有收到用户输入，优先检查：
 
@@ -481,10 +485,10 @@ workflows/
 
 要区分两类模板：
 
-| 类型 | 源码位置 | 目标位置 | 用途 |
-|---|---|---|---|
+| 类型     | 源码位置                    | 目标位置                     | 用途                                  |
+| -------- | --------------------------- | ---------------------------- | ------------------------------------- |
 | 命令模板 | `templates/commands/*.md` | agent 命令目录或 skills 目录 | 告诉 AI agent 如何执行 `/speckit.*` |
-| 工件模板 | `templates/*-template.md` | `.specify/templates/*.md` | 生成 spec、plan、tasks 等项目工件 |
+| 工件模板 | `templates/*-template.md` | `.specify/templates/*.md`  | 生成 spec、plan、tasks 等项目工件     |
 
 很多初学者会混淆这两者。
 
@@ -531,7 +535,8 @@ Preset 的定位是：**改变 Spec Kit 的工作方式，但不新增 Python �
 核心文件：
 
 ```text
-src/specify_cli/presets.py
+src/specify_cli/presets/__init__.py
+src/specify_cli/presets/_commands.py
 presets/README.md
 presets/lean/preset.yml
 presets/self-test/preset.yml
@@ -560,20 +565,20 @@ provides:
 
 模板类型：
 
-| type | 作用 |
-|---|---|
+| type         | 作用                                   |
+| ------------ | -------------------------------------- |
 | `template` | 替换或组合 `.specify/templates/*.md` |
-| `command` | 替换或组合 agent 命令 |
-| `script` | 替换或包装脚本 |
+| `command`  | 替换或组合 agent 命令                  |
+| `script`   | 替换或包装脚本                         |
 
 策略：
 
-| strategy | 含义 |
-|---|---|
-| `replace` | 完全替换 |
-| `prepend` | 在核心模板前添加内容 |
-| `append` | 在核心模板后添加内容 |
-| `wrap` | 用 `{CORE_TEMPLATE}` 包住核心模板 |
+| strategy    | 含义                                |
+| ----------- | ----------------------------------- |
+| `replace` | 完全替换                            |
+| `prepend` | 在核心模板前添加内容                |
+| `append`  | 在核心模板后添加内容                |
+| `wrap`    | 用 `{CORE_TEMPLATE}` 包住核心模板 |
 
 脚本只支持 `replace` 和 `wrap`，因为脚本的 prepend/append 语义很容易破坏可执行逻辑。
 
@@ -631,7 +636,8 @@ Extension 的定位是：**给 Spec Kit 增加新能力。**
 核心文件：
 
 ```text
-src/specify_cli/extensions.py
+src/specify_cli/extensions/__init__.py
+src/specify_cli/extensions/_commands.py
 extensions/README.md
 extensions/EXTENSION-DEVELOPMENT-GUIDE.md
 extensions/template/extension.yml
@@ -743,16 +749,16 @@ Workflow YAML 会被解析成 `WorkflowDefinition`。
 
 它关心：
 
-| 字段 | 作用 |
-|---|---|
-| `workflow.id` | workflow 唯一 ID |
-| `workflow.name` | 展示名称 |
-| `workflow.version` | semver 版本 |
+| 字段                     | 作用             |
+| ------------------------ | ---------------- |
+| `workflow.id`          | workflow 唯一 ID |
+| `workflow.name`        | 展示名称         |
+| `workflow.version`     | semver 版本      |
 | `workflow.integration` | 默认 integration |
-| `workflow.model` | 默认模型 |
-| `workflow.options` | 默认选项 |
-| `inputs` | 用户输入定义 |
-| `steps` | 步骤列表 |
+| `workflow.model`       | 默认模型         |
+| `workflow.options`     | 默认选项         |
+| `inputs`               | 用户输入定义     |
+| `steps`                | 步骤列表         |
 
 `validate_workflow()` 会检查 schema version、ID 格式、版本格式、input 类型、step ID 唯一性、step type 是否存在。
 
@@ -766,18 +772,18 @@ STEP_REGISTRY: dict[str, StepBase]
 
 内置 step 类型包括：
 
-| type | 作用 |
-|---|---|
-| `command` | 调用 Spec Kit command |
-| `prompt` | 向 agent 发送 prompt |
-| `shell` | 执行 shell 命令 |
-| `gate` | 人工确认或暂停点 |
-| `if` | 条件分支 |
-| `switch` | 多分支 |
-| `while` | 条件循环 |
-| `do-while` | 先执行后判断的循环 |
-| `fan-out` | 对集合逐项执行 |
-| `fan-in` | 聚合 fan-out 结果 |
+| type         | 作用                  |
+| ------------ | --------------------- |
+| `command`  | 调用 Spec Kit command |
+| `prompt`   | 向 agent 发送 prompt  |
+| `shell`    | 执行 shell 命令       |
+| `gate`     | 人工确认或暂停点      |
+| `if`       | 条件分支              |
+| `switch`   | 多分支                |
+| `while`    | 条件循环              |
+| `do-while` | 先执行后判断的循环    |
+| `fan-out`  | 对集合逐项执行        |
+| `fan-in`   | 聚合 fan-out 结果     |
 
 每个 step 继承 `StepBase`，实现：
 
@@ -789,25 +795,25 @@ execute(config: dict[str, Any], context: StepContext) -> StepResult
 
 `StepContext` 是 step 执行时共享的上下文：
 
-| 字段 | 含义 |
-|---|---|
-| `inputs` | workflow 输入 |
-| `steps` | 已执行 step 的结果 |
-| `item` | fan-out 当前项 |
-| `fan_in` | fan-in 聚合结果 |
-| `default_integration` | 默认 integration |
-| `default_model` | 默认模型 |
-| `project_root` | 项目根目录 |
-| `run_id` | 当前运行 ID |
+| 字段                    | 含义               |
+| ----------------------- | ------------------ |
+| `inputs`              | workflow 输入      |
+| `steps`               | 已执行 step 的结果 |
+| `item`                | fan-out 当前项     |
+| `fan_in`              | fan-in 聚合结果    |
+| `default_integration` | 默认 integration   |
+| `default_model`       | 默认模型           |
+| `project_root`        | 项目根目录         |
+| `run_id`              | 当前运行 ID        |
 
 `StepResult` 是 step 的返回值：
 
-| 字段 | 含义 |
-|---|---|
-| `status` | completed、failed、paused 等 |
-| `output` | step 输出数据 |
-| `next_steps` | 控制流产生的嵌套步骤 |
-| `error` | 失败信息 |
+| 字段           | 含义                         |
+| -------------- | ---------------------------- |
+| `status`     | completed、failed、paused 等 |
+| `output`     | step 输出数据                |
+| `next_steps` | 控制流产生的嵌套步骤         |
+| `error`      | 失败信息                     |
 
 理解这两个对象，就能读懂 workflow engine 的大部分逻辑。
 
@@ -851,9 +857,55 @@ integration:
 
 如果读取失败，则保留默认值或按 fallback 处理。
 
-## 10. Catalog 机制
+## 10. Bundle 机制
 
-Preset、extension、workflow 都有 catalog 概念。
+Bundle 的定位是：**把已有 Spec Kit 组件组合成一个可安装、可更新、可移除的角色或团队栈。**
+
+它适合做：
+
+- 给某类角色准备一套工具，例如 product manager、business analyst、developer。
+- 把多个 presets、extensions、workflows 和 steps 作为一个版本化组合发布。
+- 在团队内统一安装经过验证的 Spec Kit 组件集合。
+- 给新项目提供一条更短的 bootstrap 路径。
+
+核心文件：
+
+```text
+src/specify_cli/commands/bundle/__init__.py
+src/specify_cli/bundler/models/manifest.py
+src/specify_cli/bundler/models/catalog.py
+src/specify_cli/bundler/services/resolver.py
+src/specify_cli/bundler/services/installer.py
+src/specify_cli/bundler/services/packager.py
+docs/reference/bundles.md
+examples/bundles/*/bundle.yml
+```
+
+关键理解：
+
+- Bundle 自己不定义新的 SDD 运行时能力；它把已有 primitive 组合起来。
+- `bundle.yml` 是 bundle 的声明入口，描述组件、版本、优先级、目标 integration 和元数据。
+- `resolver` 负责把声明解析成安装计划。
+- `installer` 负责把安装计划交给 preset、extension、workflow、step 等 primitive installer 执行。
+- `records` 和 provenance 记录用于支持后续 update/remove，避免误删其他 bundle 仍然需要的组件。
+
+一个简化安装链路是：
+
+```text
+bundle id / bundle.yml / .zip
+  -> catalog 或本地 manifest
+  -> BundleManifest
+  -> resolve_install_plan()
+  -> install_bundle()
+  -> DefaultPrimitiveInstaller
+  -> preset / extension / workflow / step 各自安装逻辑
+```
+
+调试 bundle 时，重点不要只看 `commands/bundle/__init__.py`。命令入口负责 CLI 交互，真正的解析、冲突检查、安装、打包逻辑分散在 `src/specify_cli/bundler/models/` 和 `src/specify_cli/bundler/services/`。
+
+## 11. Catalog 机制
+
+Preset、extension、workflow、bundle 都有 catalog 概念。
 
 它解决的问题是：**如何发现和安装官方或社区提供的包。**
 
@@ -866,6 +918,9 @@ extensions/catalog.json
 extensions/catalog.community.json
 workflows/catalog.json
 workflows/catalog.community.json
+.specify/bundle-catalogs.yml
+~/.specify/bundle-catalogs.yml
+built-in bundle catalog sources
 ```
 
 常见命令：
@@ -874,13 +929,14 @@ workflows/catalog.community.json
 specify preset catalog list
 specify extension catalog list
 specify workflow catalog list
+specify bundle catalog list
 ```
 
 Catalog 通常分两类：
 
-| 类型 | 含义 |
-|---|---|
-| official | 官方维护、默认可安装 |
+| 类型      | 含义                                 |
+| --------- | ------------------------------------ |
+| official  | 官方维护、默认可安装                 |
 | community | 社区贡献，通常需要用户自行判断可信度 |
 
 学习 catalog 时要重点看：
@@ -888,25 +944,26 @@ Catalog 通常分两类：
 - catalog entry 结构。
 - `install_allowed` 的含义。
 - cache 机制。
-- project-level 和 user-level catalog stack。
+- project-level、user-level 和 built-in catalog stack。
 - 环境变量是否允许覆盖默认 catalog。
 
 Catalog 是发现机制，不是信任机制。安装社区 workflow 或 extension 前应查看来源内容。
 
-## 11. Integration、Preset、Extension、Workflow 的边界
+## 12. Integration、Preset、Extension、Workflow、Bundle 的边界
 
 这是深入使用 Spec Kit 时最重要的判断题。
 
-| 需求 | 应该用 |
-|---|---|
-| 支持一个新的 AI agent | Integration |
-| 改变 spec/plan/tasks 的组织方式 | Preset |
-| 新增一个 `/speckit.xxx.yyy` 能力 | Extension |
-| 把多个步骤自动串起来 | Workflow |
-| 改一个核心 SDD 命令的提示词 | Preset 或 core template |
-| 接入 Git、Issue、CI、质量检查 | Extension |
-| 让团队统一使用一套模板 | Preset |
-| 让团队一键执行一串流程 | Workflow |
+| 需求                               | 应该用                  |
+| ---------------------------------- | ----------------------- |
+| 支持一个新的 AI agent              | Integration             |
+| 改变 spec/plan/tasks 的组织方式    | Preset                  |
+| 新增一个 `/speckit.xxx.yyy` 能力 | Extension               |
+| 把多个步骤自动串起来               | Workflow                |
+| 改一个核心 SDD 命令的提示词        | Preset 或 core template |
+| 接入 Git、Issue、CI、质量检查      | Extension               |
+| 让团队统一使用一套模板             | Preset                  |
+| 让团队一键执行一串流程             | Workflow                |
+| 让团队一键安装一整套组件           | Bundle                  |
 
 一个实用判断法：
 
@@ -914,14 +971,16 @@ Catalog 是发现机制，不是信任机制。安装社区 workflow 或 extensi
 2. **目标是改变默认方法论吗？** 是 -> preset。
 3. **目标是新增能力吗？** 是 -> extension。
 4. **目标是自动编排多个能力吗？** 是 -> workflow。
+5. **目标是组合并分发一组已有能力吗？** 是 -> bundle。
 
 不要用 extension 去改一堆核心模板，也不要用 preset 去模拟一个新命令。能工作不代表边界清晰。
+同理，不要把 bundle 当成新的能力实现层；bundle 应该负责组合和版本化，不应该把业务逻辑塞进安装清单里。
 
-## 12. 新增 Integration 的实战路径
+## 13. 新增 Integration 的实战路径
 
 新增 integration 时，按这个顺序做最稳。
 
-### 12.1 先确定 agent 类型
+### 13.1 先确定 agent 类型
 
 先回答：
 
@@ -935,7 +994,7 @@ Catalog 是发现机制，不是信任机制。安装社区 workflow 或 extensi
 
 如果 `requires_cli=True`，`key` 应该匹配真实可执行文件名。例如 `cursor-agent` 不应该简写成 `cursor`。
 
-### 12.2 建子包
+### 13.2 建子包
 
 路径规则：
 
@@ -945,12 +1004,12 @@ src/specify_cli/integrations/<package_dir>/__init__.py
 
 如果 key 有 hyphen，目录用 underscore：
 
-| key | package dir |
-|---|---|
-| `kiro-cli` | `kiro_cli` |
+| key              | package dir      |
+| ---------------- | ---------------- |
+| `kiro-cli`     | `kiro_cli`     |
 | `cursor-agent` | `cursor_agent` |
 
-### 12.3 填 class
+### 13.3 填 class
 
 最小 Markdown integration 类似：
 
@@ -976,7 +1035,7 @@ class ExampleIntegration(MarkdownIntegration):
     context_file = "EXAMPLE.md"
 ```
 
-### 12.4 注册
+### 13.4 注册
 
 修改：
 
@@ -986,7 +1045,7 @@ src/specify_cli/integrations/__init__.py
 
 在 `_register_builtins()` 中加 import 和 `_register()`，保持字母顺序。
 
-### 12.5 写测试
+### 13.5 写测试
 
 测试文件：
 
@@ -1012,9 +1071,9 @@ pytest tests/test_agent_config_consistency.py -v
 - 如果是 skills，`SKILL.md` 结构正确。
 - 如果是 CLI-based，`requires_cli` 和 key 逻辑正确。
 
-## 13. 常见调试场景
+## 14. 常见调试场景
 
-### 13.1 `specify integration list` 看不到新 integration
+### 14.1 `specify integration list` 看不到新 integration
 
 检查：
 
@@ -1032,7 +1091,7 @@ python -m src.specify_cli integration list
 pytest tests/integrations/test_registry.py -v
 ```
 
-### 13.2 命令文件生成了，但 agent 调不起来
+### 14.2 命令文件生成了，但 agent 调不起来
 
 检查：
 
@@ -1043,17 +1102,17 @@ pytest tests/integrations/test_registry.py -v
 5. 参数占位符是否是 agent 支持的格式。
 6. context file 是否告诉 agent 使用 Spec Kit。
 
-### 13.3 `{SCRIPT}` 没有替换
+### 14.3 `{SCRIPT}` 没有替换
 
 检查：
 
 1. 命令模板 frontmatter 是否包含 `scripts:`。
-2. `--script` 选择的是 `sh` 还是 `ps`。
-3. 对应 `scripts.sh` 或 `scripts.ps` 是否存在。
+2. `--script` 选择的是 `sh`、`ps` 还是 `py`。
+3. 对应 `scripts.<script_type>` 是否存在。
 4. integration 是否调用了 `process_template()`。
 5. 自定义 `setup()` 是否绕过了基类处理。
 
-### 13.4 `$ARGUMENTS` 没有替换
+### 14.4 `$ARGUMENTS` 没有替换
 
 检查：
 
@@ -1062,7 +1121,7 @@ pytest tests/integrations/test_registry.py -v
 3. 输出格式是不是 TOML/YAML，需要 `{{args}}`。
 4. 特殊 agent 是否有自定义占位符，例如 Forge。
 
-### 13.5 卸载后文件没被删
+### 14.5 卸载后文件没被删
 
 这通常不是 bug。原因可能是：
 
@@ -1077,7 +1136,7 @@ pytest tests/integrations/test_registry.py -v
 .specify/integrations/<key>.manifest.json
 ```
 
-### 13.6 切换 integration 后模板命令风格不对
+### 14.6 切换 integration 后模板命令风格不对
 
 检查：
 
@@ -1093,7 +1152,7 @@ pytest tests/integrations/test_registry.py -v
 
 共享模板必须跟默认 integration 的调用风格一致。
 
-### 13.7 Workflow 没有用当前项目的 agent
+### 14.7 Workflow 没有用当前项目的 agent
 
 检查：
 
@@ -1102,55 +1161,77 @@ pytest tests/integrations/test_registry.py -v
 3. `.specify/integration.json` 是否存在且可解析。
 4. `default_integration` 是否被 step-level `integration` 覆盖。
 
-## 14. 读源码的推荐顺序
+### 14.8 Bundle 安装结果和预期不一致
+
+检查：
+
+1. `bundle.yml` 中声明的组件是否能在 active catalogs 或 bundle 内部解析到。
+2. bundle 是否声明了和当前项目不一致的 target integration。
+3. `specify bundle info <id>` 展开的 component set 是否符合预期。
+4. `.specify/bundles/` 或 bundle records 中是否记录了该 bundle 的 provenance。
+5. 组件是否已经由别的 bundle 安装，导致本次 install 跳过或 remove 时保留。
+
+建议命令：
+
+```powershell
+python -m src.specify_cli bundle info <bundle-id>
+python -m src.specify_cli bundle list
+python -m src.specify_cli bundle validate --path <bundle-dir>
+```
+
+## 15. 读源码的推荐顺序
 
 如果目标是理解原理，而不是马上改 bug，建议按这个顺序：
 
 1. `docs/concepts/sdd.md`
 2. `docs/reference/core.md`
 3. `src/specify_cli/__init__.py`
-4. `src/specify_cli/shared_infra.py`
-5. `src/specify_cli/integrations/__init__.py`
-6. `src/specify_cli/integrations/base.py`
-7. `src/specify_cli/integrations/codex/__init__.py`
-8. `src/specify_cli/integrations/gemini/__init__.py`
-9. `src/specify_cli/integrations/goose/__init__.py`
-10. `src/specify_cli/integrations/copilot/__init__.py`
-11. `src/specify_cli/agents.py`
-12. `src/specify_cli/presets.py`
-13. `src/specify_cli/extensions.py`
-14. `src/specify_cli/workflows/base.py`
-15. `src/specify_cli/workflows/engine.py`
-16. `src/specify_cli/workflows/steps/*/__init__.py`
-17. 对应测试文件
+4. `src/specify_cli/commands/init.py`
+5. `src/specify_cli/shared_infra.py`
+6. `src/specify_cli/integrations/__init__.py`
+7. `src/specify_cli/integrations/base.py`
+8. `src/specify_cli/integrations/codex/__init__.py`
+9. `src/specify_cli/integrations/gemini/__init__.py`
+10. `src/specify_cli/integrations/goose/__init__.py`
+11. `src/specify_cli/integrations/copilot/__init__.py`
+12. `src/specify_cli/agents.py`
+13. `src/specify_cli/presets/_commands.py`
+14. `src/specify_cli/extensions/_commands.py`
+15. `src/specify_cli/commands/bundle/__init__.py`
+16. `src/specify_cli/bundler/services/installer.py`
+17. `src/specify_cli/workflows/base.py`
+18. `src/specify_cli/workflows/engine.py`
+19. `src/specify_cli/workflows/steps/*/__init__.py`
+20. 对应测试文件
 
 读每个模块时，用这张表做笔记：
 
-| 问题 | 记录 |
-|---|---|
-| 这个模块负责什么？ | |
-| 它读哪些文件？ | |
-| 它写哪些文件？ | |
-| 它依赖哪些 registry？ | |
-| 它如何保护用户改动？ | |
-| 它有哪些路径安全检查？ | |
-| 它对应哪些测试？ | |
+| 问题                   | 记录 |
+| ---------------------- | ---- |
+| 这个模块负责什么？     |      |
+| 它读哪些文件？         |      |
+| 它写哪些文件？         |      |
+| 它依赖哪些 registry？  |      |
+| 它如何保护用户改动？   |      |
+| 它有哪些路径安全检查？ |      |
+| 它对应哪些测试？       |      |
 
-## 15. 修改不同模块时应该跑哪些测试
+## 16. 修改不同模块时应该跑哪些测试
 
-| 修改范围 | 建议测试 |
-|---|---|
-| CLI 参数或命令入口 | `pytest tests/test_cli_version.py tests/test_check_tool.py -v`，以及相关命令的专项测试 |
-| integration registry | `pytest tests/integrations/test_registry.py -v` |
+| 修改范围               | 建议测试                                                                                                                                                                                                                |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLI 参数或命令入口     | `pytest tests/test_cli_version.py tests/test_check_tool.py -v`，以及相关命令的专项测试                                                                                                                                |
+| integration registry   | `pytest tests/integrations/test_registry.py -v`                                                                                                                                                                       |
 | integration base class | `pytest tests/integrations/test_integration_base_markdown.py tests/integrations/test_integration_base_toml.py tests/integrations/test_integration_base_yaml.py tests/integrations/test_integration_base_skills.py -v` |
-| 某个 integration | `pytest tests/integrations/test_integration_<name>.py -v` |
-| agent config 派生 | `pytest tests/test_agent_config_consistency.py -v` |
-| manifest 安全 | `pytest tests/integrations/test_manifest.py -v` |
-| preset | `pytest tests/test_presets.py -v` |
-| extension | `pytest tests/test_extensions.py tests/test_extension_registration.py -v` |
-| git extension | `pytest tests/extensions/git/test_git_extension.py -v` |
-| workflow | `pytest tests/test_workflows.py -v` |
-| 脚本行为 | `pytest tests/test_setup_plan_feature_json.py tests/test_setup_tasks.py tests/test_branch_numbering.py -v` |
+| 某个 integration       | `pytest tests/integrations/test_integration_<name>.py -v`                                                                                                                                                             |
+| agent config 派生      | `pytest tests/test_agent_config_consistency.py -v`                                                                                                                                                                    |
+| manifest 安全          | `pytest tests/integrations/test_manifest.py -v`                                                                                                                                                                       |
+| preset                 | `pytest tests/test_presets.py -v`                                                                                                                                                                                     |
+| extension              | `pytest tests/test_extensions.py tests/test_extension_registration.py -v`                                                                                                                                             |
+| git extension          | `pytest tests/extensions/git/test_git_extension.py -v`                                                                                                                                                                |
+| workflow               | `pytest tests/test_workflows.py -v`                                                                                                                                                                                   |
+| bundle                 | `pytest tests/unit/test_bundler_*.py tests/integration/test_bundler_*.py tests/contract/test_bundle_cli.py -v`                                                                                                      |
+| 脚本行为               | `pytest tests/test_setup_plan_feature_json.py tests/test_setup_tasks.py tests/test_branch_numbering.py -v`                                                                                                            |
 
 如果不确定，先跑目标模块测试，再跑：
 
@@ -1161,9 +1242,9 @@ pytest tests/test_extensions.py -v
 pytest tests/test_workflows.py -v
 ```
 
-## 16. 深入使用技巧
+## 17. 深入使用技巧
 
-### 16.1 把 Spec Kit 当成“可审查流程”
+### 17.1 把 Spec Kit 当成“可审查流程”
 
 不要只让 AI 跑 `/speckit.implement`。高质量使用方式是：
 
@@ -1174,7 +1255,7 @@ pytest tests/test_workflows.py -v
 
 如果前面工件质量不高，后面的实现会把模糊性变成随机性。
 
-### 16.2 让 constitution 写具体约束
+### 17.2 让 constitution 写具体约束
 
 `constitution.md` 不应该只写“代码要高质量”。它应该写可执行约束：
 
@@ -1187,7 +1268,7 @@ pytest tests/test_workflows.py -v
 
 AI agent 更容易遵守具体规则，而不是抽象口号。
 
-### 16.3 用 preset 固化团队风格
+### 17.3 用 preset 固化团队风格
 
 如果你发现自己每个项目都要改同样的 `spec-template.md` 或 `plan-template.md`，不要长期手改 core 模板。更好的方式是做一个 preset。
 
@@ -1198,7 +1279,7 @@ Preset 的价值是可复用和可版本化：
 - 后续可以升级。
 - 不污染 upstream core。
 
-### 16.4 用 extension 扩展项目能力
+### 17.4 用 extension 扩展项目能力
 
 如果你想加“把 tasks 转成某个平台 issue”“检查 spec 是否满足公司规范”“生成发布说明”这类能力，用 extension。
 
@@ -1209,7 +1290,7 @@ Extension 的价值是可启停：
 - 可以独立发布。
 - 不和 core 命令混在一起。
 
-### 16.5 用 workflow 固化重复流程
+### 17.5 用 workflow 固化重复流程
 
 如果一组命令你会反复按同样顺序执行，就考虑 workflow。
 
@@ -1226,7 +1307,19 @@ Workflow 的价值是可重复：
 - 可以保存运行状态。
 - 可以让团队共享一套流程。
 
-## 17. 常见误区
+### 17.6 用 bundle 固化角色或团队栈
+
+如果你希望新人或某个角色一条命令拿到一整套 presets、extensions、workflows 和 steps，用 bundle。
+
+Bundle 的价值是可分发：
+
+- 一个 manifest 描述完整组件集。
+- 可以 pin 版本。
+- 可以检查冲突。
+- 可以更新和移除。
+- 不需要用户逐条执行安装命令。
+
+## 18. 常见误区
 
 ### 误区 1：把 Spec Kit 当成普通代码生成器
 
@@ -1256,19 +1349,24 @@ Skills agent 往往用 `/speckit-plan`。命令引用风格由 integration 的 `
 
 Agent 命令文件告诉 agent “执行某个命令时做什么”，context file 告诉 agent “这个项目长期遵循什么规则”。两者缺一不可。
 
-## 18. 一张总览表
+### 误区 8：把 bundle 当成 extension
 
-| 模块 | 关键文件 | 主要状态文件 | 核心问题 |
-|---|---|---|---|
-| CLI | `src/specify_cli/__init__.py` | `.specify/init-options.json` | 用户命令如何映射到模块 |
-| Shared infra | `src/specify_cli/shared_infra.py` | `.specify/integrations/speckit.manifest.json` | 模板和脚本如何安全安装 |
-| Integration | `src/specify_cli/integrations/*` | `.specify/integration.json`、`.specify/integrations/<key>.manifest.json` | agent 差异如何统一 |
-| Registrar | `src/specify_cli/agents.py` | agent 命令目录 | extension/preset 命令如何渲染 |
-| Preset | `src/specify_cli/presets.py` | `.specify/presets/.registry` | 工作方式如何层叠定制 |
-| Extension | `src/specify_cli/extensions.py` | `.specify/extensions/.registry` | 新能力如何安装和卸载 |
-| Workflow | `src/specify_cli/workflows/*` | `.specify/workflows/runs/<run_id>/` | 多步骤流程如何执行和恢复 |
+Bundle 不应该承载新命令或业务逻辑。它负责组合、版本化和分发已有组件；真正的新能力应该放在 extension、workflow 或 step 里。
 
-## 19. 推荐练习
+## 19. 一张总览表
+
+| 模块         | 关键文件                            | 主要状态文件                                                                 | 核心问题                      |
+| ------------ | ----------------------------------- | ---------------------------------------------------------------------------- | ----------------------------- |
+| CLI          | `src/specify_cli/__init__.py`、`src/specify_cli/commands/init.py` | `.specify/init-options.json`                                               | 用户命令如何映射到模块        |
+| Shared infra | `src/specify_cli/shared_infra.py` | `.specify/integrations/speckit.manifest.json`                              | 模板和脚本如何安全安装        |
+| Integration  | `src/specify_cli/integrations/*`  | `.specify/integration.json`、`.specify/integrations/<key>.manifest.json` | agent 差异如何统一            |
+| Registrar    | `src/specify_cli/agents.py`       | agent 命令目录                                                               | extension/preset 命令如何渲染 |
+| Preset       | `src/specify_cli/presets/`        | `.specify/presets/.registry`                                               | 工作方式如何层叠定制          |
+| Extension    | `src/specify_cli/extensions/`     | `.specify/extensions/.registry`                                            | 新能力如何安装和卸载          |
+| Workflow     | `src/specify_cli/workflows/*`     | `.specify/workflows/runs/<run_id>/`                                        | 多步骤流程如何执行和恢复      |
+| Bundle       | `src/specify_cli/bundler/*`、`src/specify_cli/commands/bundle/__init__.py` | `.specify/bundle-records.json` | 组件栈如何组合、安装、更新和移除 |
+
+## 20. 推荐练习
 
 ### 练习 1：追踪一次 init
 
@@ -1342,7 +1440,9 @@ Get-ChildItem ..\spec-kit-demo-lean\.agents\skills -Recurse
 
 ```powershell
 cd ..\spec-kit-demo-principles
-python -m D:\studyProject\spec-kit\src.specify_cli extension add git
+$env:PYTHONPATH = "D:\studyProject\spec-kit"
+python -m src.specify_cli extension add git
+Remove-Item Env:PYTHONPATH
 ```
 
 检查：
@@ -1371,7 +1471,22 @@ Get-ChildItem .specify\workflows\runs -Recurse
 - 找到 `state.json`、`inputs.json`、`workflow.yml`、`log.jsonl`。
 - 解释 resume 为什么不依赖原始 workflow 文件。
 
-## 20. 最后应该形成的能力
+### 练习 6：验证并构建一个 bundle
+
+运行：
+
+```powershell
+python -m src.specify_cli bundle validate --path examples\bundles\developer
+python -m src.specify_cli bundle build --path examples\bundles\developer --output ..\spec-kit-bundle-demo
+```
+
+目标：
+
+- 读懂 `examples/bundles/developer/bundle.yml` 的组件声明。
+- 解释 `validate` 检查的是 manifest 结构和组件引用，而不是安装运行时行为。
+- 解释 build 产出的 `.zip` 如何被 `specify bundle install` 使用。
+
+## 21. 最后应该形成的能力
 
 学完本文后，你应该能做到：
 
@@ -1379,6 +1494,7 @@ Get-ChildItem .specify\workflows\runs -Recurse
 - 看到一个 integration 类，就能判断它会生成什么格式的命令文件。
 - 遇到 agent 命令不可用，能按目录、格式、占位符、context file、manifest 逐项排查。
 - 判断需求该用 integration、preset、extension 还是 workflow。
+- 判断什么时候应该用 bundle 组合已有组件。
 - 新增一个简单 Markdown integration，并写对应测试。
 - 修改 preset 或 extension 时知道状态文件和 registry 在哪里。
 - 读 workflow YAML 时能预判运行状态会怎么保存。

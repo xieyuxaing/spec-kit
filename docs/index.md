@@ -132,6 +132,10 @@ Community extensions like CI Guard and Architecture Guard add compliance gates a
     <strong>Development</strong>
     <span>Contribute to Spec Kit</span>
   </a>
+  <a href="learning/README.md" class="nav-card">
+    <strong>Source Learning</strong>
+    <span>Read the Chinese source study plan and architecture notes</span>
+  </a>
   <a href="concepts/sdd.md" class="nav-card">
     <strong>What is SDD?</strong>
     <span>The philosophy behind Spec-Driven Development</span>

@@ -5,18 +5,22 @@
 > 目标：从“会使用 Specify CLI”逐步推进到“能读懂核心实现、能添加集成、能修复问题并提交贡献”。
 
 > 配套深入阅读：[Spec Kit 使用原理与进阶技巧](spec-kit-principles-and-techniques.md) 负责解释架构心智模型、执行链路、模块边界和调试方法。建议在执行本计划的第 1 周后开始同步阅读。
+>
+> 本目录入口：[Spec Kit 学习文档](README.md)。
 
 ## 学习路线总览
 
-这个项目可以按 5 条主线理解：
+这个项目可以按 7 条主线理解：
 
 1. **Spec-Driven Development 方法论**：理解 Spec Kit 为什么要把需求、计划、任务、实现拆成阶段。
-2. **Specify CLI**：理解 `specify init`、`integration`、`preset`、`extension`、`workflow` 等命令如何工作。
+2. **Specify CLI**：理解 `specify init`、`integration`、`preset`、`extension`、`workflow`、`bundle` 等命令如何工作。
 3. **Integration 架构**：理解不同 AI agent 如何通过统一 registry 和 base class 接入。
 4. **模板、脚本和资产打包**：理解 `.specify/`、templates、scripts、core pack、wheel 打包之间的关系。
-5. **测试和贡献流程**：能跑测试、定位问题、添加新集成或修复 bug。
+5. **Preset / Extension / Bundle 生态**：理解工作方式定制、新能力扩展和角色化组合安装的边界。
+6. **Workflow Engine**：理解自动化、多步骤、可暂停恢复的 SDD 执行模型。
+7. **测试和贡献流程**：能跑测试、定位问题、添加新集成或修复 bug。
 
-建议节奏：每天 60-90 分钟，持续 6 周。时间紧的话可以压缩成 3 周，每天完成两个小节。
+建议节奏：每天 60-90 分钟，持续 7 周。时间紧的话可以压缩成 4 周，每天完成两个小节。
 
 ## 第 0 周：环境和基本体验
 
@@ -49,6 +53,7 @@ python -m src.specify_cli integration --help
 python -m src.specify_cli preset --help
 python -m src.specify_cli extension --help
 python -m src.specify_cli workflow --help
+python -m src.specify_cli bundle --help
 ```
 
 - 初始化一个临时项目：
@@ -62,6 +67,7 @@ python -m src.specify_cli init ..\spec-kit-demo --integration codex --ignore-age
 - 能解释 `specify init` 会生成哪些目录。
 - 能说明 `.specify/`、agent command files、context file 的用途。
 - 能成功跑通一个本地 `init` 示例。
+- 本周产出物：一份 demo 项目目录树笔记，标出每类文件来自 core、integration 还是用户输入。
 
 ## 第 1 周：理解 SDD 工作流和用户视角
 
@@ -111,6 +117,12 @@ rg "constitution|specify|plan|tasks|implement" templates src tests
 重点文件：
 
 - `src/specify_cli/__init__.py`
+- `src/specify_cli/commands/init.py`
+- `src/specify_cli/integrations/_commands.py`
+- `src/specify_cli/presets/_commands.py`
+- `src/specify_cli/extensions/_commands.py`
+- `src/specify_cli/workflows/_commands.py`
+- `src/specify_cli/commands/bundle/__init__.py`
 - `src/specify_cli/_console.py`
 - `src/specify_cli/_utils.py`
 - `src/specify_cli/_assets.py`
@@ -118,22 +130,23 @@ rg "constitution|specify|plan|tasks|implement" templates src tests
 
 阅读顺序：
 
-1. 从 `app = typer.Typer(...)` 开始看 CLI 注册。
-2. 找 `@app.command()`，列出顶层命令。
-3. 重点读 `init()`，理解项目初始化流程。
-4. 再读 integration、preset、extension、workflow 相关命令。
+1. 从 `src/specify_cli/__init__.py` 的 `app = typer.Typer(...)` 开始看根命令。
+2. 找 `register(app)` 和 `app.add_typer(...)`，列出顶层命令组。
+3. 重点读 `src/specify_cli/commands/init.py`，理解项目初始化流程。
+4. 再读 integration、preset、extension、workflow、bundle 的命令模块。
 
 动手任务：
 
 - 给自己写一份命令映射表：
 
-| CLI 命令 | 入口函数 | 主要职责 | 依赖模块 |
+| CLI 命令 | 入口模块 | 主要职责 | 依赖模块 |
 |---|---|---|---|
-| `specify init` | `init()` | 初始化项目 | integrations, shared_infra, assets |
-| `specify integration list` | `integration_list()` | 列出集成 | integrations |
-| `specify preset add` | `preset_add()` | 安装 preset | presets |
-| `specify extension add` | `extension_add()` | 安装 extension | extensions |
-| `specify workflow run` | `workflow_run()` | 运行 workflow | workflows |
+| `specify init` | `commands/init.py` | 初始化项目 | integrations, shared_infra, assets |
+| `specify integration *` | `integrations/_commands.py` 等 | 管理 AI agent 集成 | integrations, integration_state |
+| `specify preset *` | `presets/_commands.py` | 安装和管理 preset | presets, catalogs |
+| `specify extension *` | `extensions/_commands.py` | 安装和管理 extension | extensions, catalogs, agents |
+| `specify workflow *` | `workflows/_commands.py` | 运行和管理 workflow | workflows |
+| `specify bundle *` | `commands/bundle/__init__.py` | 安装和管理组件组合包 | bundler, presets, extensions, workflows |
 
 建议调试：
 
@@ -141,6 +154,7 @@ rg "constitution|specify|plan|tasks|implement" templates src tests
 python -m src.specify_cli --version
 python -m src.specify_cli check
 python -m src.specify_cli integration list
+python -m src.specify_cli bundle search --help
 ```
 
 验收标准：
@@ -148,6 +162,7 @@ python -m src.specify_cli integration list
 - 能说明 `Typer` 在这个项目里如何组织命令。
 - 能从 CLI 参数追踪到对应的核心逻辑。
 - 能解释 `--integration`、`--script`、`--ignore-agent-tools` 的作用。
+- 本周产出物：一张命令映射表，至少覆盖 `init`、`integration`、`preset`、`extension`、`workflow`、`bundle`。
 
 ## 第 3 周：Integration 架构
 
@@ -203,6 +218,7 @@ pytest tests/integrations/test_integration_copilot.py -v
 - 能新增一个简单 Markdown integration。
 - 能解释为什么 CLI-based integration 的 `key` 要匹配可执行文件名。
 - 能解释 manifest 如何支持 uninstall。
+- 本周产出物：一张 4 个 integration 的对比表，记录 base class、输出目录、context file、参数占位符。
 
 ## 第 4 周：Presets、Extensions 和 Template Resolution
 
@@ -210,8 +226,10 @@ pytest tests/integrations/test_integration_copilot.py -v
 
 重点文件：
 
-- `src/specify_cli/presets.py`
-- `src/specify_cli/extensions.py`
+- `src/specify_cli/presets/__init__.py`
+- `src/specify_cli/presets/_commands.py`
+- `src/specify_cli/extensions/__init__.py`
+- `src/specify_cli/extensions/_commands.py`
 - `src/specify_cli/catalogs.py`
 - `src/specify_cli/shared_infra.py`
 - `presets/README.md`
@@ -239,8 +257,11 @@ python -m src.specify_cli init ..\spec-kit-preset-demo --integration codex --pre
 - 在临时项目中安装 bundled extension：
 
 ```powershell
-cd ..\spec-kit-preset-demo
-python -m D:\studyProject\spec-kit\src.specify_cli extension add git
+Push-Location ..\spec-kit-preset-demo
+$env:PYTHONPATH = "D:\studyProject\spec-kit"
+python -m src.specify_cli extension add git
+Remove-Item Env:PYTHONPATH
+Pop-Location
 ```
 
 - 观察 `.specify/` 和 agent 命令目录变化。
@@ -250,8 +271,47 @@ python -m D:\studyProject\spec-kit\src.specify_cli extension add git
 - 能解释“模板运行时解析”和“命令安装时写入”的区别。
 - 能说明 preset 更适合改“工作方式”，extension 更适合加“新能力”。
 - 能定位某个命令文件最终来自 core、preset 还是 extension。
+- 本周产出物：一张 resolution stack 图，标出 project-local、preset、extension、core 的优先级。
 
-## 第 5 周：Workflow Engine
+## 第 5 周：Bundles 和组件组合
+
+**目标**：理解 bundle 如何把 extensions、presets、workflows 和 steps 组合成角色或团队可复用的安装单元。
+
+重点文件：
+
+- `src/specify_cli/commands/bundle/__init__.py`
+- `src/specify_cli/bundler/models/manifest.py`
+- `src/specify_cli/bundler/models/catalog.py`
+- `src/specify_cli/bundler/services/resolver.py`
+- `src/specify_cli/bundler/services/installer.py`
+- `src/specify_cli/bundler/services/packager.py`
+- `docs/reference/bundles.md`
+- `docs/community/bundles.md`
+- `examples/bundles/*/bundle.yml`
+
+核心问题：
+
+- bundle 和 preset / extension / workflow 的边界是什么？
+- `bundle.yml` 如何声明组件、版本、优先级和目标 integration？
+- 安装 bundle 时，哪些逻辑委托给 primitive installer，哪些逻辑由 bundler 自己负责？
+- 为什么 bundle 是分发和组合层，而不是新的运行时能力？
+
+动手任务：
+
+```powershell
+python -m src.specify_cli bundle search --help
+python -m src.specify_cli bundle validate --path examples\bundles\developer
+python -m src.specify_cli bundle build --path examples\bundles\developer --output ..\spec-kit-bundle-demo
+```
+
+验收标准：
+
+- 能解释 bundle 安装和单独安装 preset / extension 的区别。
+- 能读懂一个 `bundle.yml`，说清楚它会安装哪些组件。
+- 能说明 bundle 的 catalog、manifest、resolver、installer 各自负责什么。
+- 本周产出物：一张 bundle install 数据流图，从 catalog/local path 到 primitive install。
+
+## 第 6 周：Workflow Engine
 
 **目标**：理解自动化工作流的执行模型。
 
@@ -298,8 +358,9 @@ pytest tests/test_workflows.py -v
 - 能说明 workflow 如何暂停、恢复和保存状态。
 - 能解释表达式系统负责什么。
 - 能新增或修改一个简单 workflow step 的测试。
+- 本周产出物：一份 workflow run 状态目录说明，解释 `state.json`、`inputs.json`、`workflow.yml`、`log.jsonl`。
 
-## 第 6 周：测试、调试和贡献
+## 第 7 周：测试、调试和贡献
 
 **目标**：具备真实贡献能力。
 
@@ -343,6 +404,7 @@ pytest tests/test_workflows.py -v
 - 能独立完成一个小 PR 级别修改。
 - 能解释失败测试的原因。
 - 能知道改 CLI、改集成、改模板分别应该跑哪些测试。
+- 本周产出物：一份“改动范围 -> 测试命令 -> 手工验证”的 checklist。
 
 ## 每周复盘问题
 
@@ -361,17 +423,20 @@ pytest tests/test_workflows.py -v
 1. `README.md`
 2. `docs/local-development.md`
 3. `src/specify_cli/__init__.py`
-4. `src/specify_cli/integrations/__init__.py`
-5. `src/specify_cli/integrations/base.py`
-6. `src/specify_cli/integrations/codex/__init__.py`
-7. `src/specify_cli/integrations/copilot/__init__.py`
-8. `src/specify_cli/shared_infra.py`
-9. `src/specify_cli/presets.py`
-10. `src/specify_cli/extensions.py`
-11. `src/specify_cli/workflows/engine.py`
-12. `tests/integrations/test_registry.py`
-13. `tests/integrations/test_integration_codex.py`
-14. `tests/test_workflows.py`
+4. `src/specify_cli/commands/init.py`
+5. `src/specify_cli/integrations/__init__.py`
+6. `src/specify_cli/integrations/base.py`
+7. `src/specify_cli/integrations/codex/__init__.py`
+8. `src/specify_cli/integrations/copilot/__init__.py`
+9. `src/specify_cli/shared_infra.py`
+10. `src/specify_cli/presets/_commands.py`
+11. `src/specify_cli/extensions/_commands.py`
+12. `src/specify_cli/commands/bundle/__init__.py`
+13. `src/specify_cli/bundler/services/installer.py`
+14. `src/specify_cli/workflows/engine.py`
+15. `tests/integrations/test_registry.py`
+16. `tests/integrations/test_integration_codex.py`
+17. `tests/test_workflows.py`
 
 ## 学习笔记模板
 
@@ -406,5 +471,6 @@ pytest tests/test_workflows.py -v
 - 读懂 integration registry 和 base classes。
 - 添加一个新的 AI agent integration。
 - 判断 preset、extension、local override 的使用场景。
+- 解释 bundle 如何组合 preset、extension、workflow 和 step。
 - 跑相关测试并根据失败信息定位问题。
 - 给 upstream 提交一个小而完整的贡献。
