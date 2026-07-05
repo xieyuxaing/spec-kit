@@ -1376,15 +1376,15 @@ Bundle 不应该承载新命令或业务逻辑。它负责组合、版本化和�
 运行：
 
 ```bash
-uv run specify init ../spec-kit-demo-principles --integration codex --ignore-agent-tools --script sh
+uv run specify init docs/learning/demos/spec-kit-demo-principles --integration codex --ignore-agent-tools --script sh
 ```
 
 然后检查：
 
 ```bash
-find ../spec-kit-demo-principles/.specify -maxdepth 3 -type f | sort
-find ../spec-kit-demo-principles/.agents/skills -maxdepth 3 -type f | sort
-cat ../spec-kit-demo-principles/.specify/integration.json
+find docs/learning/demos/spec-kit-demo-principles/.specify -maxdepth 3 -type f | sort
+find docs/learning/demos/spec-kit-demo-principles/.agents/skills -maxdepth 3 -type f | sort
+cat docs/learning/demos/spec-kit-demo-principles/.specify/integration.json
 ```
 
 如果要观察 context file，先在 demo 项目里单独安装或启用 `agent-context` extension，再检查它写入的 managed section；不要把 `AGENTS.md` 当成 `init` 的默认产物。
@@ -1400,14 +1400,14 @@ cat ../spec-kit-demo-principles/.specify/integration.json
 分别初始化：
 
 ```bash
-uv run specify init ../spec-kit-demo-codex --integration codex --ignore-agent-tools --script sh
-uv run specify init ../spec-kit-demo-gemini --integration gemini --ignore-agent-tools --script sh
+uv run specify init docs/learning/demos/spec-kit-demo-codex --integration codex --ignore-agent-tools --script sh
+uv run specify init docs/learning/demos/spec-kit-demo-gemini --integration gemini --ignore-agent-tools --script sh
 ```
 
 对比：
 
 ```bash
-rg "speckit" ../spec-kit-demo-codex ../spec-kit-demo-gemini
+rg "speckit" docs/learning/demos/spec-kit-demo-codex docs/learning/demos/spec-kit-demo-gemini
 ```
 
 目标：
@@ -1421,15 +1421,15 @@ rg "speckit" ../spec-kit-demo-codex ../spec-kit-demo-gemini
 运行：
 
 ```bash
-uv run specify init ../spec-kit-demo-lean --integration codex --preset lean --ignore-agent-tools --script sh
+uv run specify init docs/learning/demos/spec-kit-demo-lean --integration codex --preset lean --ignore-agent-tools --script sh
 ```
 
 检查：
 
 ```bash
-cat ../spec-kit-demo-lean/.specify/presets/.registry
-find ../spec-kit-demo-lean/.specify/templates -maxdepth 2 -type f | sort
-find ../spec-kit-demo-lean/.agents/skills -maxdepth 3 -type f | sort
+cat docs/learning/demos/spec-kit-demo-lean/.specify/presets/.registry
+find docs/learning/demos/spec-kit-demo-lean/.specify/templates -maxdepth 2 -type f | sort
+find docs/learning/demos/spec-kit-demo-lean/.agents/skills -maxdepth 3 -type f | sort
 ```
 
 目标：
@@ -1443,7 +1443,7 @@ find ../spec-kit-demo-lean/.agents/skills -maxdepth 3 -type f | sort
 
 ```bash
 (
-  cd ../spec-kit-demo-principles
+  cd docs/learning/demos/spec-kit-demo-principles
   /home/xieyx/projects/spec-kit/.venv/bin/specify extension add git
 )
 ```
@@ -1451,9 +1451,9 @@ find ../spec-kit-demo-lean/.agents/skills -maxdepth 3 -type f | sort
 检查：
 
 ```bash
-cat ../spec-kit-demo-principles/.specify/extensions/.registry
-find ../spec-kit-demo-principles/.specify/extensions/git -maxdepth 4 -type f | sort
-rg "speckit-git" ../spec-kit-demo-principles/.agents/skills
+cat docs/learning/demos/spec-kit-demo-principles/.specify/extensions/.registry
+find docs/learning/demos/spec-kit-demo-principles/.specify/extensions/git -maxdepth 4 -type f | sort
+rg "speckit-git" docs/learning/demos/spec-kit-demo-principles/.agents/skills
 ```
 
 目标：
@@ -1480,7 +1480,7 @@ find .specify/workflows/runs -maxdepth 4 -type f | sort
 
 ```bash
 uv run specify bundle validate --path examples/bundles/developer
-uv run specify bundle build --path examples/bundles/developer --output ../spec-kit-bundle-demo
+uv run specify bundle build --path examples/bundles/developer --output docs/learning/demos/spec-kit-bundle-demo
 ```
 
 目标：
