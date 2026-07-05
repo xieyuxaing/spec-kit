@@ -2,6 +2,13 @@
 
 这个目录集中存放面向 `spec-kit` 源码学习的中文材料。
 
+## 当前约定
+
+- 主工作区：WSL 内的 `/home/xieyx/projects/spec-kit`。
+- Windows 目录：`D:\studyProject\spec-kit` 只作为同步镜像；后续以 WSL 修改、验证、提交为准。
+- 学习资料边界：只维护 `docs/learning/`，不修改官方文档入口文件 `docs/toc.yml`、`docs/index.md`、`docs/README.md`。
+- 实战目标：把 Spec Kit 的 SDD 流程逐步应用到同级项目 `/home/xieyx/projects/tu-share-stock-screener`。
+
 | 文档 | 用途 | 建议读法 |
 | --- | --- | --- |
 | [深度学习计划](learning-plan.md) | 安排学习顺序、练习和验收标准 | 先读，按周推进 |

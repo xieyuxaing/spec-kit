@@ -1,6 +1,6 @@
 # Spec Kit 使用原理与进阶技巧
 
-> 适用仓库：`D:\studyProject\spec-kit`
+> 适用仓库：`/home/xieyx/projects/spec-kit`
 >
 > 阅读目标：不只会运行 `specify init` 和 `/speckit.*` 命令，而是理解 Spec Kit 的设计边界、执行链路、扩展机制和调试方法。
 >
@@ -38,7 +38,7 @@ specify CLI
   |
   +-- 安装 integration：.agents/skills、.gemini/commands、.github/agents 等
   |
-  +-- 写入 agent context file：AGENTS.md、GEMINI.md、CLAUDE.md 等
+  +-- 可选 extension 管理 agent context file：AGENTS.md、GEMINI.md、CLAUDE.md 等
   |
   +-- 记录状态：.specify/integration.json、manifest、registry
   |
@@ -140,7 +140,9 @@ CLI 使用 Typer 定义命令。`src/specify_cli/__init__.py` 中的 `app = type
 - `my-project`：创建或使用一个目标目录。
 - `--here` 或 `.`：在当前目录合并安装。
 
-如果当前目录非空，CLI 默认会提醒，因为初始化会写入 `.specify/`、agent 命令目录、context file 等文件。`--force` 用来跳过确认或覆盖部分 managed 文件。
+如果当前目录非空，CLI 默认会提醒，因为初始化会写入 `.specify/`、agent 命令目录等文件。`--force` 用来跳过确认或覆盖部分 managed 文件。
+
+注意：`specify init` 本身不创建、更新或迁移 `AGENTS.md`、`CLAUDE.md`、`.github/copilot-instructions.md` 这类 context file。若需要 Spec Kit 维护这些文件，必须单独启用 `agent-context` extension。
 
 理解这个逻辑有助于判断为什么同一个命令在空目录和已有项目里表现不同。
 
@@ -261,7 +263,6 @@ class GeminiIntegration(TomlIntegration):
         "args": "{{args}}",
         "extension": ".toml",
     }
-    context_file = "GEMINI.md"
 ```
 
 字段含义：
@@ -276,9 +277,10 @@ class GeminiIntegration(TomlIntegration):
 | `registrar_config["format"]`    | 输出格式：markdown、toml、yaml 等                     |
 | `registrar_config["args"]`      | agent 接收用户参数的占位符                            |
 | `registrar_config["extension"]` | 命令文件扩展名，skills 用 `/SKILL.md`               |
-| `context_file`                  | 写入 Spec Kit managed section 的 agent 指令文件       |
 
 `config` 偏向“agent 元数据和 init 安装位置”，`registrar_config` 偏向“后续 extension/preset 生成命令时怎么渲染”。
+
+不要在 integration 类里声明 `context_file`。当前架构把 context file 完全交给 `agent-context` extension；Python integration registry 只负责命令文件、安装目录、格式和 CLI 检查。
 
 ### 4.3 Base class 的选择
 
@@ -317,41 +319,42 @@ IntegrationBase.process_template()
 | `{SCRIPT}`                                    | 替换成对应脚本命令                                    |
 | `{ARGS}` / `$ARGUMENTS`                     | 替换成当前 agent 的参数占位符                         |
 | `__AGENT__`                                   | 替换成 integration key                                |
-| `__CONTEXT_FILE__`                            | 替换成当前 agent 的 context file                      |
 | `scripts/` / `templates/` 等路径            | 改写到 `.specify/scripts/`、`.specify/templates/` |
 | `__SPECKIT_COMMAND_*__`                       | 改写成 agent 对应的 slash command 调用                |
 
 这条流水线解释了为什么新 integration 多数时候不需要重写 `setup()`：只要 agent 的输出格式是标准 Markdown、TOML、YAML 或 skills，基类就能处理绝大多数差异。
 
-### 4.5 Context file 是 agent 长期记忆入口
+### 4.5 Context file 由 agent-context extension 管理
 
-`context_file` 通常是：
+Context file 仍然重要，但它不属于 `specify init` 或 integration 类的职责。当前设计是：
 
-| Agent   | context file                        |
-| ------- | ----------------------------------- |
-| Codex   | `AGENTS.md`                       |
-| Claude  | `CLAUDE.md`                       |
-| Gemini  | `GEMINI.md`                       |
-| Copilot | `.github/copilot-instructions.md` |
-| Cursor  | `.cursor/rules/specify-rules.mdc` |
+- Specify CLI 不保存任何 agent-context 状态。
+- Integration 类不声明 `context_file`。
+- CLI 不创建、更新、删除、解析或迁移 context file。
+- `agent-context` 是一个完整 opt-in extension；没有安装或启用它时，Spec Kit 不触碰 context file。
 
-`IntegrationBase.upsert_context_section()` 会写入：
+`agent-context` extension 的配置文件是：
 
 ```text
-<!-- SPECKIT START -->
-...
-<!-- SPECKIT END -->
+.specify/extensions/agent-context/agent-context-config.yml
 ```
 
-这是一段 managed section。再次安装或升级时，Spec Kit 只替换标记之间的内容，尽量保留用户在同一文件里的其他内容。
+它维护：
 
-卸载时，`remove_context_section()` 只删除完整、顺序正确的 managed section。如果标记损坏，它会保守地保留文件，避免误删用户内容。
+```yaml
+context_file: CLAUDE.md
+context_markers:
+  start: "<!-- SPECKIT START -->"
+  end: "<!-- SPECKIT END -->"
+```
+
+如果 `context_file` 为空，extension 自己会读取 `.specify/init-options.json` 里的 active integration key，再通过它自带的 `agent-context-defaults.json` 映射到默认文件，例如 Codex 对应 `AGENTS.md`。这个映射不来自 Python registry。
 
 学习技巧：
 
-- 如果 agent 行为不符合预期，先看 context file 是否存在。
-- 再看 managed section 是否是当前 integration 生成的。
-- 再看命令文件中 `__CONTEXT_FILE__` 是否已正确替换。
+- 如果要研究 context file，先从 `extensions/agent-context/README.md`、`extension.yml` 和 `scripts/bash/update-agent-context.sh` 读起。
+- 如果 agent 命令能生成但长期规则没有更新，先确认项目是否安装并启用了 `agent-context` extension。
+- 不要把旧资料中的 `IntegrationBase.upsert_context_section()`、`remove_context_section()` 或 `context_file` 类字段当成当前源码事实。
 
 ### 4.6 Manifest 保护用户改动
 
@@ -376,7 +379,7 @@ Integration 安装时会记录每个 managed 文件的 hash：
 一个 integration 想声明 `multi_install_safe = True`，通常要满足：
 
 - agent 目录独立。
-- context file 不和其他 safe integration 冲突。
+- agent 命令目录和 manifest 不和其他 safe integration 冲突。
 - 命令调用风格稳定。
 - 安装 manifest 独立。
 - 不需要动态用户目录，例如任意 `--commands-dir`。
@@ -513,9 +516,9 @@ workflows/
 
 深入学习时要经常把命令模板和脚本一起看：
 
-```powershell
-Get-Content templates\commands\plan.md
-Get-Content scripts\powershell\setup-plan.ps1
+```bash
+sed -n '1,180p' templates/commands/plan.md
+sed -n '1,180p' scripts/bash/setup-plan.sh
 ```
 
 否则容易误以为所有逻辑都在 Python 里。
@@ -925,11 +928,11 @@ built-in bundle catalog sources
 
 常见命令：
 
-```powershell
-specify preset catalog list
-specify extension catalog list
-specify workflow catalog list
-specify bundle catalog list
+```bash
+uv run specify preset catalog list
+uv run specify extension catalog list
+uv run specify workflow catalog list
+uv run specify bundle catalog list
 ```
 
 Catalog 通常分两类：
@@ -988,7 +991,7 @@ Catalog 是发现机制，不是信任机制。安装社区 workflow 或 extensi
 2. 它的可执行文件名是什么？
 3. 它读什么格式的命令？
 4. 命令目录在哪里？
-5. 是否需要 context file？
+5. 是否需要额外项目上下文？如果需要，应通过 `agent-context` extension 管理，而不是写进 integration 类。
 6. 参数占位符是什么？
 7. slash command 调用风格是什么？
 
@@ -1032,7 +1035,6 @@ class ExampleIntegration(MarkdownIntegration):
         "args": "$ARGUMENTS",
         "extension": ".md",
     }
-    context_file = "EXAMPLE.md"
 ```
 
 ### 13.4 注册
@@ -1055,10 +1057,10 @@ tests/integrations/test_integration_<key_with_underscores>.py
 
 常跑：
 
-```powershell
-pytest tests/integrations/test_registry.py -v
-pytest tests/integrations/test_integration_<name>.py -v
-pytest tests/test_agent_config_consistency.py -v
+```bash
+uv run python -m pytest tests/integrations/test_registry.py -v
+uv run python -m pytest tests/integrations/test_integration_<name>.py -v
+uv run python -m pytest tests/test_agent_config_consistency.py -v
 ```
 
 测试重点：
@@ -1066,10 +1068,11 @@ pytest tests/test_agent_config_consistency.py -v
 - registry 能看到它。
 - 输出目录正确。
 - 命令文件格式正确。
-- context file 写入正确。
 - uninstall/manifest 行为正确。
 - 如果是 skills，`SKILL.md` 结构正确。
 - 如果是 CLI-based，`requires_cli` 和 key 逻辑正确。
+
+如果这个 agent 还需要项目级 context file，另行确认 `extensions/agent-context/agent-context-defaults.json` 是否需要补默认映射；不要把这一步混进 integration 类。
 
 ## 14. 常见调试场景
 
@@ -1086,9 +1089,9 @@ pytest tests/test_agent_config_consistency.py -v
 
 建议命令：
 
-```powershell
-python -m src.specify_cli integration list
-pytest tests/integrations/test_registry.py -v
+```bash
+uv run specify integration list
+uv run python -m pytest tests/integrations/test_registry.py -v
 ```
 
 ### 14.2 命令文件生成了，但 agent 调不起来
@@ -1100,7 +1103,7 @@ pytest tests/integrations/test_registry.py -v
 3. agent 是否要求额外 frontmatter。
 4. slash command 名是否和文件名匹配。
 5. 参数占位符是否是 agent 支持的格式。
-6. context file 是否告诉 agent 使用 Spec Kit。
+6. 如果项目依赖长期上下文，是否安装并启用了 `agent-context` extension，且 managed section 已刷新。
 
 ### 14.3 `{SCRIPT}` 没有替换
 
@@ -1126,7 +1129,7 @@ pytest tests/integrations/test_registry.py -v
 这通常不是 bug。原因可能是：
 
 - 文件 hash 和 manifest 不一致，说明用户改过。
-- context section 标记不完整，出于安全保留。
+- 文件来自 opt-in extension 或用户手写，不在该 integration manifest 里。
 - 文件不在 manifest 里，Spec Kit 不认为它是 managed 文件。
 - 需要 `--force` 才删除。
 
@@ -1173,10 +1176,10 @@ pytest tests/integrations/test_registry.py -v
 
 建议命令：
 
-```powershell
-python -m src.specify_cli bundle info <bundle-id>
-python -m src.specify_cli bundle list
-python -m src.specify_cli bundle validate --path <bundle-dir>
+```bash
+uv run specify bundle info <bundle-id>
+uv run specify bundle list
+uv run specify bundle validate --path <bundle-dir>
 ```
 
 ## 15. 读源码的推荐顺序
@@ -1220,26 +1223,26 @@ python -m src.specify_cli bundle validate --path <bundle-dir>
 
 | 修改范围               | 建议测试                                                                                                                                                                                                                |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CLI 参数或命令入口     | `pytest tests/test_cli_version.py tests/test_check_tool.py -v`，以及相关命令的专项测试                                                                                                                                |
-| integration registry   | `pytest tests/integrations/test_registry.py -v`                                                                                                                                                                       |
-| integration base class | `pytest tests/integrations/test_integration_base_markdown.py tests/integrations/test_integration_base_toml.py tests/integrations/test_integration_base_yaml.py tests/integrations/test_integration_base_skills.py -v` |
-| 某个 integration       | `pytest tests/integrations/test_integration_<name>.py -v`                                                                                                                                                             |
-| agent config 派生      | `pytest tests/test_agent_config_consistency.py -v`                                                                                                                                                                    |
-| manifest 安全          | `pytest tests/integrations/test_manifest.py -v`                                                                                                                                                                       |
-| preset                 | `pytest tests/test_presets.py -v`                                                                                                                                                                                     |
-| extension              | `pytest tests/test_extensions.py tests/test_extension_registration.py -v`                                                                                                                                             |
-| git extension          | `pytest tests/extensions/git/test_git_extension.py -v`                                                                                                                                                                |
-| workflow               | `pytest tests/test_workflows.py -v`                                                                                                                                                                                   |
-| bundle                 | `pytest tests/unit/test_bundler_*.py tests/integration/test_bundler_*.py tests/contract/test_bundle_cli.py -v`                                                                                                      |
-| 脚本行为               | `pytest tests/test_setup_plan_feature_json.py tests/test_setup_tasks.py tests/test_branch_numbering.py -v`                                                                                                            |
+| CLI 参数或命令入口     | `uv run python -m pytest tests/test_cli_version.py tests/test_check_tool.py -v`，以及相关命令的专项测试                                                                                                                                |
+| integration registry   | `uv run python -m pytest tests/integrations/test_registry.py -v`                                                                                                                                                                       |
+| integration base class | `uv run python -m pytest tests/integrations/test_integration_base_markdown.py tests/integrations/test_integration_base_toml.py tests/integrations/test_integration_base_yaml.py tests/integrations/test_integration_base_skills.py -v` |
+| 某个 integration       | `uv run python -m pytest tests/integrations/test_integration_<name>.py -v`                                                                                                                                                             |
+| agent config 派生      | `uv run python -m pytest tests/test_agent_config_consistency.py -v`                                                                                                                                                                    |
+| manifest 安全          | `uv run python -m pytest tests/integrations/test_manifest.py -v`                                                                                                                                                                       |
+| preset                 | `uv run python -m pytest tests/test_presets.py -v`                                                                                                                                                                                     |
+| extension              | `uv run python -m pytest tests/test_extensions.py tests/test_extension_registration.py -v`                                                                                                                                             |
+| git extension          | `uv run python -m pytest tests/extensions/git/test_git_extension.py -v`                                                                                                                                                                |
+| workflow               | `uv run python -m pytest tests/test_workflows.py -v`                                                                                                                                                                                   |
+| bundle                 | `uv run python -m pytest tests/unit/test_bundler_*.py tests/integration/test_bundler_*.py tests/contract/test_bundle_cli.py -v`                                                                                                      |
+| 脚本行为               | `uv run python -m pytest tests/test_setup_plan_feature_json.py tests/test_setup_tasks.py tests/test_branch_numbering.py -v`                                                                                                            |
 
 如果不确定，先跑目标模块测试，再跑：
 
-```powershell
-pytest tests/integrations -v
-pytest tests/test_agent_config_consistency.py -v
-pytest tests/test_extensions.py -v
-pytest tests/test_workflows.py -v
+```bash
+uv run python -m pytest tests/integrations -v
+uv run python -m pytest tests/test_agent_config_consistency.py -v
+uv run python -m pytest tests/test_extensions.py -v
+uv run python -m pytest tests/test_workflows.py -v
 ```
 
 ## 17. 深入使用技巧
@@ -1345,9 +1348,9 @@ Spec Kit 会通过 manifest 发现你改过文件，然后默认保留。需要�
 
 Skills agent 往往用 `/speckit-plan`。命令引用风格由 integration 的 `invoke_separator` 决定。
 
-### 误区 7：忽略 context file
+### 误区 7：把 context file 当成 init 的内置产物
 
-Agent 命令文件告诉 agent “执行某个命令时做什么”，context file 告诉 agent “这个项目长期遵循什么规则”。两者缺一不可。
+Agent 命令文件告诉 agent “执行某个命令时做什么”；context file 告诉 agent “这个项目长期遵循什么规则”。后者仍然有价值，但当前架构把它放进 opt-in 的 `agent-context` extension。默认 `specify init` 不会写 `AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md`。
 
 ### 误区 8：把 bundle 当成 extension
 
@@ -1372,18 +1375,19 @@ Bundle 不应该承载新命令或业务逻辑。它负责组合、版本化和�
 
 运行：
 
-```powershell
-python -m src.specify_cli init ..\spec-kit-demo-principles --integration codex --ignore-agent-tools --script ps
+```bash
+uv run specify init ../spec-kit-demo-principles --integration codex --ignore-agent-tools --script sh
 ```
 
 然后检查：
 
-```powershell
-Get-ChildItem ..\spec-kit-demo-principles\.specify -Recurse
-Get-ChildItem ..\spec-kit-demo-principles\.agents\skills -Recurse
-Get-Content ..\spec-kit-demo-principles\AGENTS.md
-Get-Content ..\spec-kit-demo-principles\.specify\integration.json
+```bash
+find ../spec-kit-demo-principles/.specify -maxdepth 3 -type f | sort
+find ../spec-kit-demo-principles/.agents/skills -maxdepth 3 -type f | sort
+cat ../spec-kit-demo-principles/.specify/integration.json
 ```
+
+如果要观察 context file，先在 demo 项目里单独安装或启用 `agent-context` extension，再检查它写入的 managed section；不要把 `AGENTS.md` 当成 `init` 的默认产物。
 
 目标：
 
@@ -1395,16 +1399,15 @@ Get-Content ..\spec-kit-demo-principles\.specify\integration.json
 
 分别初始化：
 
-```powershell
-python -m src.specify_cli init ..\spec-kit-demo-codex --integration codex --ignore-agent-tools --script ps
-python -m src.specify_cli init ..\spec-kit-demo-gemini --integration gemini --ignore-agent-tools --script ps
+```bash
+uv run specify init ../spec-kit-demo-codex --integration codex --ignore-agent-tools --script sh
+uv run specify init ../spec-kit-demo-gemini --integration gemini --ignore-agent-tools --script sh
 ```
 
 对比：
 
-```powershell
-Get-ChildItem ..\spec-kit-demo-codex -Recurse | Select-String "speckit"
-Get-ChildItem ..\spec-kit-demo-gemini -Recurse | Select-String "speckit"
+```bash
+rg "speckit" ../spec-kit-demo-codex ../spec-kit-demo-gemini
 ```
 
 目标：
@@ -1417,16 +1420,16 @@ Get-ChildItem ..\spec-kit-demo-gemini -Recurse | Select-String "speckit"
 
 运行：
 
-```powershell
-python -m src.specify_cli init ..\spec-kit-demo-lean --integration codex --preset lean --ignore-agent-tools --script ps
+```bash
+uv run specify init ../spec-kit-demo-lean --integration codex --preset lean --ignore-agent-tools --script sh
 ```
 
 检查：
 
-```powershell
-Get-Content ..\spec-kit-demo-lean\.specify\presets\.registry
-Get-ChildItem ..\spec-kit-demo-lean\.specify\templates
-Get-ChildItem ..\spec-kit-demo-lean\.agents\skills -Recurse
+```bash
+cat ../spec-kit-demo-lean/.specify/presets/.registry
+find ../spec-kit-demo-lean/.specify/templates -maxdepth 2 -type f | sort
+find ../spec-kit-demo-lean/.agents/skills -maxdepth 3 -type f | sort
 ```
 
 目标：
@@ -1438,19 +1441,19 @@ Get-ChildItem ..\spec-kit-demo-lean\.agents\skills -Recurse
 
 在 demo 项目中运行：
 
-```powershell
-cd ..\spec-kit-demo-principles
-$env:PYTHONPATH = "D:\studyProject\spec-kit"
-python -m src.specify_cli extension add git
-Remove-Item Env:PYTHONPATH
+```bash
+(
+  cd ../spec-kit-demo-principles
+  /home/xieyx/projects/spec-kit/.venv/bin/specify extension add git
+)
 ```
 
 检查：
 
-```powershell
-Get-Content .specify\extensions\.registry
-Get-ChildItem .specify\extensions\git -Recurse
-Get-ChildItem .agents\skills -Recurse | Select-String "speckit-git"
+```bash
+cat ../spec-kit-demo-principles/.specify/extensions/.registry
+find ../spec-kit-demo-principles/.specify/extensions/git -maxdepth 4 -type f | sort
+rg "speckit-git" ../spec-kit-demo-principles/.agents/skills
 ```
 
 目标：
@@ -1462,8 +1465,8 @@ Get-ChildItem .agents\skills -Recurse | Select-String "speckit-git"
 
 运行一个 workflow 后检查：
 
-```powershell
-Get-ChildItem .specify\workflows\runs -Recurse
+```bash
+find .specify/workflows/runs -maxdepth 4 -type f | sort
 ```
 
 目标：
@@ -1475,9 +1478,9 @@ Get-ChildItem .specify\workflows\runs -Recurse
 
 运行：
 
-```powershell
-python -m src.specify_cli bundle validate --path examples\bundles\developer
-python -m src.specify_cli bundle build --path examples\bundles\developer --output ..\spec-kit-bundle-demo
+```bash
+uv run specify bundle validate --path examples/bundles/developer
+uv run specify bundle build --path examples/bundles/developer --output ../spec-kit-bundle-demo
 ```
 
 目标：
@@ -1492,7 +1495,7 @@ python -m src.specify_cli bundle build --path examples\bundles\developer --outpu
 
 - 看 `specify init` 输出目录，就知道每类文件由哪个模块创建。
 - 看到一个 integration 类，就能判断它会生成什么格式的命令文件。
-- 遇到 agent 命令不可用，能按目录、格式、占位符、context file、manifest 逐项排查。
+- 遇到 agent 命令不可用，能按目录、格式、占位符、manifest 逐项排查；涉及长期上下文时能单独定位 `agent-context` extension。
 - 判断需求该用 integration、preset、extension 还是 workflow。
 - 判断什么时候应该用 bundle 组合已有组件。
 - 新增一个简单 Markdown integration，并写对应测试。

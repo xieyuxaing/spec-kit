@@ -1,6 +1,6 @@
 # Spec Kit 深度学习计划
 
-> 适用仓库：`D:\studyProject\spec-kit`
+> 适用仓库：`/home/xieyx/projects/spec-kit`
 >
 > 目标：从“会使用 Specify CLI”逐步推进到“能读懂核心实现、能添加集成、能修复问题并提交贡献”。
 
@@ -38,34 +38,33 @@
 
 - 创建虚拟环境并安装开发依赖：
 
-```powershell
-uv venv
-.\.venv\Scripts\Activate.ps1
-uv pip install -e ".[test]"
+```bash
+cd /home/xieyx/projects/spec-kit
+uv sync --extra test
 ```
 
 - 查看 CLI：
 
-```powershell
-python -m src.specify_cli --help
-python -m src.specify_cli init --help
-python -m src.specify_cli integration --help
-python -m src.specify_cli preset --help
-python -m src.specify_cli extension --help
-python -m src.specify_cli workflow --help
-python -m src.specify_cli bundle --help
+```bash
+uv run specify --help
+uv run specify init --help
+uv run specify integration --help
+uv run specify preset --help
+uv run specify extension --help
+uv run specify workflow --help
+uv run specify bundle --help
 ```
 
 - 初始化一个临时项目：
 
-```powershell
-python -m src.specify_cli init ..\spec-kit-demo --integration codex --ignore-agent-tools --script ps
+```bash
+uv run specify init ../spec-kit-demo --integration codex --ignore-agent-tools --script sh
 ```
 
 验收标准：
 
 - 能解释 `specify init` 会生成哪些目录。
-- 能说明 `.specify/`、agent command files、context file 的用途。
+- 能说明 `.specify/`、agent command files 的用途，并知道 context file 由 opt-in 的 `agent-context` extension 管理。
 - 能成功跑通一个本地 `init` 示例。
 - 本周产出物：一份 demo 项目目录树笔记，标出每类文件来自 core、integration 还是用户输入。
 
@@ -99,7 +98,7 @@ python -m src.specify_cli init ..\spec-kit-demo --integration codex --ignore-age
 
 建议命令：
 
-```powershell
+```bash
 rg "speckit" templates src tests docs
 rg "constitution|specify|plan|tasks|implement" templates src tests
 ```
@@ -150,11 +149,11 @@ rg "constitution|specify|plan|tasks|implement" templates src tests
 
 建议调试：
 
-```powershell
-python -m src.specify_cli --version
-python -m src.specify_cli check
-python -m src.specify_cli integration list
-python -m src.specify_cli bundle search --help
+```bash
+uv run specify --version
+uv run specify check
+uv run specify integration list
+uv run specify bundle search --help
 ```
 
 验收标准：
@@ -190,27 +189,26 @@ python -m src.specify_cli bundle search --help
 - `YamlIntegration`
 - `SkillsIntegration`
 - `IntegrationManifest`
-- `context_file`
 - `registrar_config`
 
 动手任务：
 
 - 选择 4 个 integration 做对比：
 
-| Integration | Base class | 输出格式 | context file | 特殊逻辑 |
+| Integration | Base class | 输出格式 | 参数占位符 | 特殊逻辑 |
 |---|---|---|---|---|
-| Codex | `SkillsIntegration` | `SKILL.md` | `AGENTS.md` | skills mode |
-| Gemini | `TomlIntegration` | `.toml` | `GEMINI.md` | `{{args}}` |
-| Goose | `YamlIntegration` | `.yaml` | `AGENTS.md` | recipe format |
-| Copilot | `IntegrationBase` | `.agent.md` + `.prompt.md` | `.github/copilot-instructions.md` | settings merge |
+| Codex | `SkillsIntegration` | `SKILL.md` | `$ARGUMENTS` | skills mode |
+| Gemini | `TomlIntegration` | `.toml` | `{{args}}` | TOML prompt |
+| Goose | `YamlIntegration` | `.yaml` | `{{args}}` | recipe format |
+| Copilot | `IntegrationBase` | `.agent.md` + `.prompt.md` | `$ARGUMENTS` | settings merge；可选 skills mode |
 
 - 跑集成测试：
 
-```powershell
-pytest tests/integrations/test_registry.py -v
-pytest tests/integrations/test_integration_base_markdown.py -v
-pytest tests/integrations/test_integration_codex.py -v
-pytest tests/integrations/test_integration_copilot.py -v
+```bash
+uv run python -m pytest tests/integrations/test_registry.py -v
+uv run python -m pytest tests/integrations/test_integration_base_markdown.py -v
+uv run python -m pytest tests/integrations/test_integration_codex.py -v
+uv run python -m pytest tests/integrations/test_integration_copilot.py -v
 ```
 
 验收标准：
@@ -218,7 +216,7 @@ pytest tests/integrations/test_integration_copilot.py -v
 - 能新增一个简单 Markdown integration。
 - 能解释为什么 CLI-based integration 的 `key` 要匹配可执行文件名。
 - 能解释 manifest 如何支持 uninstall。
-- 本周产出物：一张 4 个 integration 的对比表，记录 base class、输出目录、context file、参数占位符。
+- 本周产出物：一张 4 个 integration 的对比表，记录 base class、输出目录、文件格式、参数占位符和特殊 setup 逻辑。
 
 ## 第 4 周：Presets、Extensions 和 Template Resolution
 
@@ -250,18 +248,17 @@ pytest tests/integrations/test_integration_copilot.py -v
 
 - 在临时项目中安装 bundled preset：
 
-```powershell
-python -m src.specify_cli init ..\spec-kit-preset-demo --integration codex --preset lean --ignore-agent-tools --script ps
+```bash
+uv run specify init ../spec-kit-preset-demo --integration codex --preset lean --ignore-agent-tools --script sh
 ```
 
 - 在临时项目中安装 bundled extension：
 
-```powershell
-Push-Location ..\spec-kit-preset-demo
-$env:PYTHONPATH = "D:\studyProject\spec-kit"
-python -m src.specify_cli extension add git
-Remove-Item Env:PYTHONPATH
-Pop-Location
+```bash
+(
+  cd ../spec-kit-preset-demo
+  /home/xieyx/projects/spec-kit/.venv/bin/specify extension add git
+)
 ```
 
 - 观察 `.specify/` 和 agent 命令目录变化。
@@ -298,10 +295,10 @@ Pop-Location
 
 动手任务：
 
-```powershell
-python -m src.specify_cli bundle search --help
-python -m src.specify_cli bundle validate --path examples\bundles\developer
-python -m src.specify_cli bundle build --path examples\bundles\developer --output ..\spec-kit-bundle-demo
+```bash
+uv run specify bundle search --help
+uv run specify bundle validate --path examples/bundles/developer
+uv run specify bundle build --path examples/bundles/developer --output ../spec-kit-bundle-demo
 ```
 
 验收标准：
@@ -342,15 +339,15 @@ python -m src.specify_cli bundle build --path examples\bundles\developer --outpu
 
 - 阅读 bundled workflow：
 
-```powershell
+```bash
 rg --files workflows
-rg "type:|steps:|command|prompt|shell|gate" workflows src\specify_cli\workflows
+rg "type:|steps:|command|prompt|shell|gate" workflows src/specify_cli/workflows
 ```
 
 - 跑 workflow 相关测试：
 
-```powershell
-pytest tests/test_workflows.py -v
+```bash
+uv run python -m pytest tests/test_workflows.py -v
 ```
 
 验收标准：
@@ -376,11 +373,11 @@ pytest tests/test_workflows.py -v
 
 常用测试命令：
 
-```powershell
-pytest -v
-pytest tests/integrations -v
-pytest tests/test_agent_config_consistency.py -v
-pytest tests/test_workflows.py -v
+```bash
+uv run python -m pytest -v
+uv run python -m pytest tests/integrations -v
+uv run python -m pytest tests/test_agent_config_consistency.py -v
+uv run python -m pytest tests/test_workflows.py -v
 ```
 
 建议贡献练习：
@@ -388,13 +385,13 @@ pytest tests/test_workflows.py -v
 1. **文档贡献**：修正一个文档中的不清晰段落。
 2. **测试贡献**：为现有 integration 增加一个边界测试。
 3. **小 bug 修复**：找一个失败场景，先写失败测试，再修复。
-4. **新增 integration**：按 `AGENTS.md` 的流程新增一个最小 Markdown integration。
+4. **新增 integration**：按本仓库 `AGENTS.md` 的流程新增一个最小 Markdown integration。
 
 新增 integration 练习步骤：
 
 - 创建 `src/specify_cli/integrations/<name>/__init__.py`
 - 继承 `MarkdownIntegration`
-- 填写 `key`、`config`、`registrar_config`、`context_file`
+- 填写 `key`、`config`、`registrar_config`
 - 在 `src/specify_cli/integrations/__init__.py` 注册
 - 新增 `tests/integrations/test_integration_<name>.py`
 - 跑单测
@@ -405,6 +402,108 @@ pytest tests/test_workflows.py -v
 - 能解释失败测试的原因。
 - 能知道改 CLI、改集成、改模板分别应该跑哪些测试。
 - 本周产出物：一份“改动范围 -> 测试命令 -> 手工验证”的 checklist。
+
+## 长期保持 upstream 最新
+
+**目标**：让本地学习分支长期跟随官方 `github/spec-kit`，同时把个人学习资料控制在最小冲突面内。
+
+当前约定：
+
+- 主工作区是 WSL：`/home/xieyx/projects/spec-kit`。
+- `origin` 是个人 fork：`https://github.com/xieyuxaing/spec-kit.git`。
+- `upstream` 是官方仓库：`https://github.com/github/spec-kit.git`。
+- 个人学习资料只放在 `docs/learning/`，不修改 `docs/toc.yml`、`docs/index.md`、`docs/README.md`。
+
+每次同步前先检查：
+
+```bash
+cd /home/xieyx/projects/spec-kit
+git status --short --branch
+git fetch upstream --prune
+git fetch origin --prune
+git rev-list --left-right --count main...upstream/main
+git rev-list --left-right --count main...origin/main
+```
+
+判断方式：
+
+- `main...origin/main = 0 N`：本地只落后个人 fork，可以 `git merge --ff-only origin/main`。
+- `main...upstream/main = 0 N`：本地只落后官方，可以 `git merge --ff-only upstream/main`，再推到 fork。
+- 左侧不是 `0`：说明本地有个人提交。先确认这些提交是否只在 `docs/learning/`；如果是，通常应该 rebase 或等待 fork 合并 upstream 后再处理。
+
+同步后的基础验证：
+
+```bash
+uv sync --extra test
+uv run specify --version
+uv run python -m pytest tests/test_agent_config_consistency.py -q
+git diff --name-status upstream/main..HEAD
+```
+
+最后一条应该只显示 `docs/learning/` 下的学习资料变更。若出现官方入口文件或源码文件，先确认是不是有意修改。
+
+## 应用到 tu-share-stock-screener 的实践路线
+
+**目标**：把 Spec Kit 的 SDD 流程应用到同级 WSL 项目 `/home/xieyx/projects/tu-share-stock-screener`，先学习流程价值，再决定哪些部分长期固化。
+
+建议选择一个低风险功能作为第一轮练习，例如：
+
+- 为某个已有页面补一段查询或筛选能力。
+- 为已有 API 增加一个只读导出或状态查看接口。
+- 为手工执行历史增加一个小的展示字段或过滤条件。
+
+实践顺序：
+
+1. 先读目标项目结构：
+
+   ```bash
+   cd /home/xieyx/projects/tu-share-stock-screener
+   git status --short --branch
+   rg --files | head -80
+   ```
+
+2. 在目标项目里建立专门分支，不直接污染主分支：
+
+   ```bash
+   git checkout -b docs/spec-kit-first-practice
+   ```
+
+3. 先只产出 Spec Kit 工件，不急着实现：
+
+   ```bash
+   # 在目标项目中运行已安装的本地 specify
+   /home/xieyx/projects/spec-kit/.venv/bin/specify init . --integration codex --ignore-agent-tools --script sh --force
+   ```
+
+   如果只是验证流程，可以在临时副本或临时目录里先跑，不要马上写入真实项目。
+
+4. 用 Spec Kit 的顺序写一轮小功能：
+
+   ```text
+   constitution -> specify -> clarify -> plan -> tasks
+   ```
+
+   第一轮先停在 `tasks.md`。重点观察：
+
+   - 生成的 spec 是否比原始需求更清楚。
+   - plan 是否捕捉了项目现有架构。
+   - tasks 是否能拆成可验证的小步。
+   - 哪些模板或说明不适合 `tu-share-stock-screener`。
+
+5. 对比目标项目现有验证方式：
+
+   ```bash
+   # 后续以目标项目自己的命令为准；这里先记录实际可用命令
+   rg "pytest|npm run|uv|python -m" README.md pyproject.toml package.json .github -n
+   ```
+
+6. 复盘是否要固化：
+
+   - 如果只是个人学习，保留 spec/plan/tasks 作为练习记录即可。
+   - 如果对真实开发有帮助，再考虑为 `tu-share-stock-screener` 写项目级 constitution。
+   - 如果发现模板不适配，再回到 Spec Kit 学习 preset/extension，而不是直接手改生成文件。
+
+这一阶段的目标不是马上让目标项目完全“Spec Kit 化”，而是验证 SDD 工件是否能减少需求不清、任务过大、验证不完整的问题。
 
 ## 每周复盘问题
 
