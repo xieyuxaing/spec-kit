@@ -123,6 +123,19 @@ class IntegrationBase(ABC):
     integration that sets this flag.
     """
 
+    def post_process_command_content(self, content: str) -> str:
+        """Transform command content after format rendering.
+
+        Called by ``register_commands()`` for non-skills format types
+        (Markdown, TOML, YAML) after the command has been rendered into
+        its target format and before writing to disk.  Skills-format
+        agents use ``post_process_skill_content()`` instead.
+
+        Subclasses may override to inject agent-specific content.
+        The default implementation returns *content* unchanged.
+        """
+        return content
+
     # -- Public API -------------------------------------------------------
 
     @classmethod
@@ -1178,12 +1191,18 @@ class YamlIntegration(IntegrationBase):
             default_flow_style=False,
         ).strip()
 
-        # Indent the body for YAML block scalar
+        # Indent the body for YAML block scalar. Use an explicit indentation
+        # indicator ("|2") rather than a bare "|": YAML infers a plain block
+        # scalar's indentation from its first non-empty line, so a body whose
+        # first line is itself indented (e.g. a markdown code block or a nested
+        # list item) would make the parser expect that deeper indent for the
+        # whole block and reject the later, less-indented lines. Pinning the
+        # indent to 2 keeps the recipe parseable whatever the body looks like.
         indented = "\n".join(f"  {line}" for line in body.split("\n"))
 
         lines = [
             header_yaml,
-            "prompt: |",
+            "prompt: |2",
             indented,
             "",
             f"# Source: {source_id}",
