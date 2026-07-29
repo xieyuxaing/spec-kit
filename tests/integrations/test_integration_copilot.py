@@ -188,6 +188,43 @@ class TestCopilotIntegration:
         assert "Copy `.specify/templates/spec-template.md`" not in content
         assert "Load `.specify/templates/spec-template.md`" not in content
 
+    def test_setup_falls_back_to_bundled_command_template_without_preset_override(self, tmp_path):
+        """Copilot should keep using the bundled specify command template when no preset override exists."""
+        from specify_cli.integrations.copilot import CopilotIntegration
+        copilot = CopilotIntegration()
+        m = IntegrationManifest("copilot", tmp_path)
+
+        copilot.setup(tmp_path, m)
+
+        specify_file = tmp_path / ".github" / "agents" / "speckit.specify.agent.md"
+        content = specify_file.read_text(encoding="utf-8")
+        assert "Create or update the feature specification" in content
+        assert "preset override content" not in content
+
+    def test_setup_uses_preset_command_override_when_present(self, tmp_path):
+        """Copilot should prefer a preset-provided command template over the bundled one."""
+        from specify_cli.integrations.copilot import CopilotIntegration
+        copilot = CopilotIntegration()
+        m = IntegrationManifest("copilot", tmp_path)
+
+        preset_dir = tmp_path / ".specify" / "presets" / "demo"
+        (preset_dir / "commands").mkdir(parents=True, exist_ok=True)
+        (preset_dir / "commands" / "speckit.specify.md").write_text(
+            "preset override content\n",
+            encoding="utf-8",
+        )
+        (tmp_path / ".specify" / "presets" / ".registry").write_text(
+            '{"schema_version": "1.0", "presets": {"demo": {"version": "1.0.0", "source": "local", "enabled": true, "priority": 10}}}',
+            encoding="utf-8",
+        )
+
+        copilot.setup(tmp_path, m)
+
+        specify_file = tmp_path / ".github" / "agents" / "speckit.specify.agent.md"
+        content = specify_file.read_text(encoding="utf-8")
+        assert "preset override content" in content
+        assert "Create or update the feature specification" not in content
+
     def test_plan_command_has_no_context_placeholder(self, tmp_path):
         """The core plan command must not carry a context-file placeholder —
         agent context files are owned by the opt-in agent-context extension."""
@@ -252,6 +289,7 @@ class TestCopilotIntegration:
             ".specify/templates/plan-template.md",
             ".specify/templates/spec-template.md",
             ".specify/templates/tasks-template.md",
+            ".specify/memory/.constitution-template.json",
             ".specify/memory/constitution.md",
             ".specify/workflows/speckit/workflow.yml",
             ".specify/workflows/workflow-registry.json",
@@ -313,6 +351,7 @@ class TestCopilotIntegration:
             ".specify/templates/plan-template.md",
             ".specify/templates/spec-template.md",
             ".specify/templates/tasks-template.md",
+            ".specify/memory/.constitution-template.json",
             ".specify/memory/constitution.md",
             ".specify/workflows/speckit/workflow.yml",
             ".specify/workflows/workflow-registry.json",
@@ -573,6 +612,17 @@ class TestCopilotSkillsMode:
         assert copilot.effective_invoke_separator({"skills": True}) == "-"
         assert copilot.effective_invoke_separator({"skills": False}) == "."
 
+    def test_invoke_separator_for_mode_tracks_persisted_state(self):
+        """Regression (review #3415): registration paths (preset/extension
+        command refs) must resolve the separator from the persisted ai_skills
+        state. A Copilot skills project renders ``/speckit-<cmd>`` (hyphen),
+        matching ``build_command_invocation``; the default markdown layout
+        renders ``/speckit.<cmd>`` (dot).
+        """
+        copilot = self._make_copilot()
+        assert copilot.invoke_separator_for_mode(True) == "-"
+        assert copilot.invoke_separator_for_mode(False) == "."
+
     def test_skill_body_has_content(self, tmp_path):
         """Each SKILL.md body should contain template content."""
         copilot = self._make_copilot()
@@ -724,6 +774,7 @@ class TestCopilotSkillsMode:
             ".specify/templates/plan-template.md",
             ".specify/templates/spec-template.md",
             ".specify/templates/tasks-template.md",
+            ".specify/memory/.constitution-template.json",
             ".specify/memory/constitution.md",
             # Bundled workflow
             ".specify/workflows/speckit/workflow.yml",

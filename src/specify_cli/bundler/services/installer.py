@@ -50,7 +50,10 @@ class InstallResult:
 
     @property
     def changed(self) -> bool:
-        return bool(self.installed or self.refreshed)
+        # `uninstalled` is a mutating outcome too: a `bundle update` whose new
+        # manifest drops components (removing them via the refresh path) with no
+        # new install/refresh must still report changed=True, not a no-op.
+        return bool(self.installed or self.refreshed or self.uninstalled)
 
 
 def install_bundle(
@@ -187,19 +190,41 @@ def remove_bundle(
 
     still_needed = components_still_needed(records, exclude_bundle_id=bundle_id)
     result = InstallResult(bundle_id=bundle_id)
+    remove_attempted = False
 
-    for component in target.contributed_components:
-        key = (component.kind, component.id)
-        if key in still_needed:
-            result.skipped.append(component)
-            continue
-        if installer.is_installed(project_root, component):
-            installer.remove(project_root, component)
-            result.uninstalled.append(component)
+    try:
+        for component in target.contributed_components:
+            key = (component.kind, component.id)
+            if key in still_needed:
+                result.skipped.append(component)
+                continue
+            if installer.is_installed(project_root, component):
+                remove_attempted = True
+                installer.remove(project_root, component)
+                result.uninstalled.append(component)
+        save_records(project_root, remove_record(records, bundle_id))
+    except Exception as exc:  # noqa: BLE001
+        if result.uninstalled:
+            detail = (
+                f"{len(result.uninstalled)} component(s) were already removed "
+                "before this failure; the bundle record was left unchanged, "
+                "so the project may be partially uninstalled."
+            )
+        elif remove_attempted:
+            detail = (
+                "No components were removed, but the failing component may "
+                "have made partial changes before raising, so the project "
+                "may be partially uninstalled."
+            )
         else:
-            result.skipped.append(component)
+            detail = (
+                "No components were removed and no removal was attempted; "
+                "the bundle record was left unchanged."
+            )
+        raise BundlerError(
+            f"Failed to remove bundle '{bundle_id}': {exc}. {detail}"
+        ) from exc
 
-    save_records(project_root, remove_record(records, bundle_id))
     return result
 
 
