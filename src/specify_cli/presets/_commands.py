@@ -13,8 +13,14 @@ from pathlib import Path
 
 import typer
 import yaml
+from rich.markup import escape as _escape_markup
 
 from .._console import console
+from .._download_security import (
+    is_https_or_localhost_http,
+    is_safe_download_redirect,
+    read_response_limited,
+)
 
 preset_app = typer.Typer(
     name="preset",
@@ -55,8 +61,9 @@ def preset_list():
         pri = pack.get('priority', 10)
         console.print(f"  [bold]{pack['name']}[/bold] ({pack['id']}) v{pack['version']} — {status} — priority {pri}")
         console.print(f"    {pack['description']}")
-        if pack.get("tags"):
-            tags_str = ", ".join(pack["tags"])
+        tags = pack.get("tags", [])
+        if isinstance(tags, list) and tags:
+            tags_str = _escape_markup(", ".join(str(t) for t in tags))
             console.print(f"    [dim]Tags: {tags_str}[/dim]")
         console.print(f"    [dim]Templates: {pack['template_count']}[/dim]")
         console.print()
@@ -101,52 +108,35 @@ def preset_add(
 
         elif from_url:
             # Validate URL scheme before downloading
-            from ipaddress import ip_address
             from urllib.parse import urlparse as _urlparse
 
             try:
                 _parsed = _urlparse(from_url)
+                _parsed.port
             except ValueError:
-                from rich.markup import escape as _escape_markup
-
                 console.print(f"[red]Error:[/red] Invalid URL: {_escape_markup(from_url)}")
                 raise typer.Exit(1)
 
-            def _is_allowed_download_url(parsed_url):
-                host = parsed_url.hostname
-                if not host:
-                    return False
-                is_loopback = host == "localhost"
-                if not is_loopback:
-                    try:
-                        is_loopback = ip_address(host).is_loopback
-                    except ValueError:
-                        # Host is not an IP literal (e.g., a regular hostname); treat as non-loopback.
-                        pass
-                return parsed_url.scheme == "https" or (parsed_url.scheme == "http" and is_loopback)
-
             def _validate_download_redirect(old_url, new_url):
-                if not _is_allowed_download_url(_urlparse(new_url)):
+                if not is_safe_download_redirect(old_url, new_url):
                     import urllib.error
 
                     raise urllib.error.URLError(
-                        "redirect target must use HTTPS with a hostname, "
-                        "or HTTP for localhost/loopback"
+                        "redirect target must use HTTPS without entering a local "
+                        "target, or stay within loopback over HTTP"
                     )
 
-            if not _is_allowed_download_url(_parsed):
+            if not is_https_or_localhost_http(from_url):
                 console.print(
-                    "[red]Error:[/red] URL must use HTTPS with a hostname, "
-                    "or HTTP for localhost/loopback."
+                    "[red]Error:[/red] URL must use HTTPS with a hostname and be "
+                    "a valid URL with a host. HTTP is only allowed for localhost, "
+                    "127.0.0.1, and ::1."
                 )
                 raise typer.Exit(1)
 
-            from rich.markup import escape as _esc
-
-            console.print(f"Installing preset from [cyan]{_esc(from_url)}[/cyan]...")
+            console.print(f"Installing preset from [cyan]{_escape_markup(from_url)}[/cyan]...")
             import urllib.error
             import tempfile
-            import shutil
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_path = Path(tmpdir) / "preset.zip"
@@ -170,20 +160,25 @@ def preset_add(
                         redirect_validator=_validate_download_redirect,
                     ) as response:
                         final_url = response.geturl() if hasattr(response, "geturl") else from_url
-                        if not _is_allowed_download_url(_urlparse(final_url)):
+                        if not is_https_or_localhost_http(final_url):
                             console.print(
                                 "[red]Error:[/red] Preset URL redirected to a disallowed URL: "
                                 f"{final_url}. Redirect targets must use HTTPS with a hostname, "
-                                "or HTTP for localhost/loopback."
+                                "or HTTP for localhost (127.0.0.1, ::1)."
                             )
                             raise typer.Exit(1)
-                        with zip_path.open("wb") as output:
-                            try:
-                                shutil.copyfileobj(response, output)
-                            except TypeError:
-                                output.write(response.read())
-                except urllib.error.URLError as e:
-                    console.print(f"[red]Error:[/red] Failed to download: {e}")
+                        zip_path.write_bytes(
+                            read_response_limited(
+                                response,
+                                error_type=PresetError,
+                                label=f"preset {from_url}",
+                            )
+                        )
+                except (urllib.error.URLError, PresetError) as e:
+                    console.print(
+                        f"[red]Error:[/red] Failed to download: "
+                        f"{_escape_markup(str(e))}"
+                    )
                     raise typer.Exit(1)
 
                 manifest = manager.install_from_zip(zip_path, speckit_version, priority)
@@ -240,13 +235,13 @@ def preset_add(
             raise typer.Exit(1)
 
     except PresetCompatibilityError as e:
-        console.print(f"[red]Compatibility Error:[/red] {e}")
+        console.print(f"[red]Compatibility Error:[/red] {_escape_markup(str(e))}")
         raise typer.Exit(1)
     except PresetValidationError as e:
-        console.print(f"[red]Validation Error:[/red] {e}")
+        console.print(f"[red]Validation Error:[/red] {_escape_markup(str(e))}")
         raise typer.Exit(1)
     except PresetError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] {_escape_markup(str(e))}")
         raise typer.Exit(1)
 
 
@@ -288,7 +283,7 @@ def preset_search(
     try:
         results = catalog.search(query=query, tag=tag, author=author)
     except PresetError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] {_escape_markup(str(e))}")
         raise typer.Exit(1)
 
     if not results:
@@ -297,10 +292,16 @@ def preset_search(
 
     console.print(f"\n[bold cyan]Presets ({len(results)} found):[/bold cyan]\n")
     for pack in results:
-        console.print(f"  [bold]{pack.get('name', pack['id'])}[/bold] ({pack['id']}) v{pack.get('version', '?')}")
-        console.print(f"    {pack.get('description', '')}")
-        if pack.get("tags"):
-            tags_str = ", ".join(pack["tags"])
+        name = _escape_markup(str(pack.get("name", pack["id"])))
+        pack_id = _escape_markup(str(pack["id"]))
+        version = _escape_markup(str(pack.get("version", "?")))
+        console.print(f"  [bold]{name}[/bold] ({pack_id}) v{version}")
+        console.print(
+            f"    {_escape_markup(str(pack.get('description', '')))}"
+        )
+        tags = pack.get("tags", [])
+        if isinstance(tags, list) and tags:
+            tags_str = _escape_markup(", ".join(str(t) for t in tags))
             console.print(f"    [dim]Tags: {tags_str}[/dim]")
         console.print()
 
@@ -379,6 +380,7 @@ def preset_info(
     from . import PresetCatalog, PresetManager, PresetError
 
     project_root = _require_specify_project()
+    safe_preset_id = _escape_markup(str(preset_id))
     # Check if installed locally first
     manager = PresetManager(project_root)
     local_pack = manager.get_pack(preset_id)
@@ -390,8 +392,9 @@ def preset_info(
         console.print(f"  Description: {local_pack.description}")
         if local_pack.author:
             console.print(f"  Author:      {local_pack.author}")
-        if local_pack.tags:
-            console.print(f"  Tags:        {', '.join(local_pack.tags)}")
+        local_tags = local_pack.tags
+        if isinstance(local_tags, list) and local_tags:
+            console.print(f"  Tags:        {', '.join(str(t) for t in local_tags)}")
         console.print(f"  Templates:   {len(local_pack.templates)}")
         for tmpl in local_pack.templates:
             console.print(f"    - {tmpl['name']} ({tmpl['type']}): {tmpl.get('description', '')}")
@@ -420,20 +423,32 @@ def preset_info(
         console.print(f"[red]Error:[/red] Preset '{preset_id}' not found (not installed and not in catalog)")
         raise typer.Exit(1)
 
-    console.print(f"\n[bold cyan]Preset: {pack_info.get('name', preset_id)}[/bold cyan]\n")
-    console.print(f"  ID:          {pack_info['id']}")
-    console.print(f"  Version:     {pack_info.get('version', '?')}")
-    console.print(f"  Description: {pack_info.get('description', '')}")
+    name = _escape_markup(str(pack_info.get("name", preset_id)))
+    console.print(f"\n[bold cyan]Preset: {name}[/bold cyan]\n")
+    console.print(f"  ID:          {_escape_markup(str(pack_info['id']))}")
+    console.print(
+        f"  Version:     {_escape_markup(str(pack_info.get('version', '?')))}"
+    )
+    console.print(
+        f"  Description: {_escape_markup(str(pack_info.get('description', '')))}"
+    )
     if pack_info.get("author"):
-        console.print(f"  Author:      {pack_info['author']}")
-    if pack_info.get("tags"):
-        console.print(f"  Tags:        {', '.join(pack_info['tags'])}")
+        console.print(
+            f"  Author:      {_escape_markup(str(pack_info['author']))}"
+        )
+    catalog_tags = pack_info.get("tags", [])
+    if isinstance(catalog_tags, list) and catalog_tags:
+        console.print(f"  Tags:        {', '.join(str(t) for t in catalog_tags)}")
     if pack_info.get("repository"):
-        console.print(f"  Repository:  {pack_info['repository']}")
+        console.print(
+            f"  Repository:  {_escape_markup(str(pack_info['repository']))}"
+        )
     if pack_info.get("license"):
-        console.print(f"  License:     {pack_info['license']}")
+        console.print(
+            f"  License:     {_escape_markup(str(pack_info['license']))}"
+        )
     console.print("\n  [yellow]Status: not installed[/yellow]")
-    console.print(f"  Install with: [cyan]specify preset add {preset_id}[/cyan]")
+    console.print(f"  Install with: [cyan]specify preset add {safe_preset_id}[/cyan]")
     console.print()
 
 
@@ -469,7 +484,14 @@ def preset_set_priority(
     raw_priority = metadata.get("priority")
     # Only skip if the stored value is already a valid int equal to requested priority
     # This ensures corrupted values (e.g., "high") get repaired even when setting to default (10)
-    if isinstance(raw_priority, int) and raw_priority == priority:
+    # A bool is an int in Python (isinstance(True, int) is True), so exclude it explicitly —
+    # mirroring normalize_priority's bool guard — otherwise a corrupted True/False priority
+    # equals 1/0 here and is never repaired.
+    if (
+        isinstance(raw_priority, int)
+        and not isinstance(raw_priority, bool)
+        and raw_priority == priority
+    ):
         console.print(f"[yellow]Preset '{preset_id}' already has priority {priority}[/yellow]")
         raise typer.Exit(0)
 
@@ -477,6 +499,9 @@ def preset_set_priority(
 
     # Update priority
     manager.registry.update(preset_id, {"priority": priority})
+    manager.reconcile_constitution(
+        f"Failed to reconcile constitution after changing priority for preset {preset_id}"
+    )
 
     console.print(f"[green]✓[/green] Preset '{preset_id}' priority changed: {old_priority} → {priority}")
     console.print("\n[dim]Lower priority = higher precedence in template resolution[/dim]")
@@ -510,6 +535,9 @@ def preset_enable(
 
     # Enable the preset
     manager.registry.update(preset_id, {"enabled": True})
+    manager.reconcile_constitution(
+        f"Failed to reconcile constitution after enabling preset {preset_id}"
+    )
 
     console.print(f"[green]✓[/green] Preset '{preset_id}' enabled")
     console.print("\nTemplates from this preset will now be included in resolution.")
@@ -544,6 +572,9 @@ def preset_disable(
 
     # Disable the preset
     manager.registry.update(preset_id, {"enabled": False})
+    manager.reconcile_constitution(
+        f"Failed to reconcile constitution after disabling preset {preset_id}"
+    )
 
     console.print(f"[green]✓[/green] Preset '{preset_id}' disabled")
     console.print("\nTemplates from this preset will be skipped during resolution.")
@@ -566,7 +597,7 @@ def preset_catalog_list():
     try:
         active_catalogs = catalog.get_active_catalogs()
     except PresetValidationError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] {_escape_markup(str(e))}")
         raise typer.Exit(1)
 
     console.print("\n[bold cyan]Active Preset Catalogs:[/bold cyan]\n")
@@ -576,10 +607,10 @@ def preset_catalog_list():
             if entry.install_allowed
             else "[yellow]discovery only[/yellow]"
         )
-        console.print(f"  [bold]{entry.name}[/bold] (priority {entry.priority})")
+        console.print(f"  [bold]{_escape_markup(str(entry.name))}[/bold] (priority {entry.priority})")
         if entry.description:
-            console.print(f"     {entry.description}")
-        console.print(f"     URL: {entry.url}")
+            console.print(f"     {_escape_markup(str(entry.description))}")
+        console.print(f"     URL: {_escape_markup(str(entry.url))}")
         console.print(f"     Install: {install_str}")
         console.print()
 
@@ -631,7 +662,7 @@ def preset_catalog_add(
     try:
         tmp_catalog._validate_catalog_url(url)
     except PresetValidationError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] {_escape_markup(str(e))}")
         raise typer.Exit(1)
 
     config_path = specify_dir / "preset-catalogs.yml"
@@ -642,7 +673,7 @@ def preset_catalog_add(
             config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         except Exception as e:
             config_label = _display_project_path(project_root, config_path)
-            console.print(f"[red]Error:[/red] Failed to read {config_label}: {e}")
+            console.print(f"[red]Error:[/red] Failed to read {_escape_markup(str(config_label))}: {_escape_markup(str(e))}")
             raise typer.Exit(1)
     else:
         config = {}

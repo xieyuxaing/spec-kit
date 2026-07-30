@@ -122,7 +122,9 @@ class CopilotIntegration(IntegrationBase):
     _skills_mode: bool = False
 
     def effective_invoke_separator(
-        self, parsed_options: dict[str, Any] | None = None
+        self,
+        parsed_options: dict[str, Any] | None = None,
+        project_root: Path | None = None,
     ) -> str:
         """Return ``"-"`` when skills mode is requested, ``"."`` otherwise."""
         if parsed_options and parsed_options.get("skills"):
@@ -130,6 +132,33 @@ class CopilotIntegration(IntegrationBase):
         if self._skills_mode:
             return "-"
         return self.invoke_separator
+
+    def is_skills_mode(
+        self,
+        parsed_options: dict[str, Any] | None = None,
+        project_root: Path | None = None,
+    ) -> bool:
+        """Copilot is skills mode when ``--skills`` was requested.
+
+        On the init path ``setup()`` has already recorded the choice in
+        ``self._skills_mode``; on the ``use``/``install`` path (where no
+        ``setup()`` runs) the signal comes from *parsed_options* (#3550), which
+        round-trips because ``--skills`` is persisted in the stored options.
+        """
+        if parsed_options and parsed_options.get("skills"):
+            return True
+        return self._skills_mode
+
+    def invoke_separator_for_mode(self, skills_enabled: bool) -> str:
+        """Skills projects render ``/speckit-<cmd>``; default markdown ``.``.
+
+        Copilot is dual-layout, so — like Bob — the command-reference
+        separator depends on the persisted ``ai_skills`` state rather than a
+        single static value.  This keeps preset/extension command refs in a
+        Copilot skills project consistent with ``build_command_invocation``
+        (which emits ``/speckit-<stem>``).
+        """
+        return "-" if skills_enabled else self.invoke_separator
 
     @classmethod
     def options(cls) -> list[IntegrationOption]:
@@ -350,6 +379,10 @@ class CopilotIntegration(IntegrationBase):
         if not templates:
             return []
 
+        from ...presets import PresetResolver
+
+        preset_resolver = PresetResolver(project_root_resolved)
+
         dest = self.commands_dest(project_root)
         dest_resolved = dest.resolve()
         try:
@@ -367,7 +400,11 @@ class CopilotIntegration(IntegrationBase):
 
         # 1. Process and write command files as .agent.md
         for src_file in templates:
-            raw = src_file.read_text(encoding="utf-8")
+            resolved_template = preset_resolver.resolve(
+                f"speckit.{src_file.stem}", template_type="command"
+            )
+            source_path = resolved_template or src_file
+            raw = source_path.read_text(encoding="utf-8")
             processed = self.process_template(
                 raw, self.key, script_type, arg_placeholder,
                 project_root=project_root,

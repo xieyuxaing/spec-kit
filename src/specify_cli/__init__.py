@@ -114,6 +114,7 @@ def _refresh_shared_templates(
     project_path: Path,
     *,
     invoke_separator: str,
+    invoke_prefix: str = "/",
     force: bool = False,
 ) -> None:
     """Refresh default-sensitive shared templates without touching scripts."""
@@ -124,6 +125,7 @@ def _refresh_shared_templates(
         repo_root=_repo_root(),
         console=console,
         invoke_separator=invoke_separator,
+        invoke_prefix=invoke_prefix,
         force=force,
     )
 
@@ -134,16 +136,16 @@ def _install_shared_infra(
     tracker: StepTracker | None = None,
     force: bool = False,
     invoke_separator: str = ".",
+    invoke_prefix: str = "/",
     refresh_managed: bool = False,
     refresh_hint: str | None = None,
 ) -> bool:
     """Install shared infrastructure files into *project_path*.
 
     Copies ``.specify/scripts/<variant>/`` and ``.specify/templates/`` from
-    the bundled core_pack or source checkout, where ``<variant>`` is
-    ``bash`` when *script_type* is ``"sh"``, ``python`` when it is ``"py"``,
-    and ``powershell`` when it is ``"ps"``.  Tracks all installed files in
-    ``speckit.manifest.json``.
+    the bundled core_pack or source checkout. ``sh`` installs Bash, ``ps``
+    installs PowerShell, and ``py`` installs Python plus the platform shell
+    fallback. Tracks all installed files in ``speckit.manifest.json``.
 
     Shared scripts and page templates are processed to resolve
     ``__SPECKIT_COMMAND_<NAME>__`` placeholders using *invoke_separator*
@@ -178,6 +180,7 @@ def _install_shared_infra(
         console=console,
         force=force,
         invoke_separator=invoke_separator,
+        invoke_prefix=invoke_prefix,
         refresh_managed=refresh_managed,
         refresh_hint=refresh_hint,
     )
@@ -189,6 +192,7 @@ def _install_shared_infra_or_exit(
     tracker: StepTracker | None = None,
     force: bool = False,
     invoke_separator: str = ".",
+    invoke_prefix: str = "/",
     refresh_managed: bool = False,
     refresh_hint: str | None = None,
 ) -> bool:
@@ -199,6 +203,7 @@ def _install_shared_infra_or_exit(
             tracker=tracker,
             force=force,
             invoke_separator=invoke_separator,
+            invoke_prefix=invoke_prefix,
             refresh_managed=refresh_managed,
             refresh_hint=refresh_hint,
         )

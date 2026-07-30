@@ -28,6 +28,7 @@ ALL_INTEGRATION_KEYS = [
     "gemini", "tabnine",
     # Stage 5 — skills, generic & option-driven integrations
     "codex", "kimi", "agy", "zed", "generic",
+    "droid",
 ]
 
 
@@ -271,6 +272,20 @@ class TestMultiInstallSafeContracts:
                 f"{first} and {second} are declared multi-install safe but both manage "
                 f"these files: {sorted(overlap)}"
             )
+
+    def test_kiro_cli_is_declared_multi_install_safe(self):
+        """kiro-cli confines itself to an isolated ``.kiro/`` root that no
+        other integration touches, so it must be declared multi-install safe
+        (issue #3471).
+
+        Before the fix, co-installing kiro-cli alongside another integration
+        left ``specify integration status`` permanently in ERROR
+        (``unsafe-multi-install``) with no way to acknowledge it. The
+        parametrized isolation/manifest contracts above already exercise
+        kiro-cli once the flag is set; this pins the declaration itself so a
+        future edit cannot silently drop it and reintroduce the error.
+        """
+        assert INTEGRATION_REGISTRY["kiro-cli"].multi_install_safe is True
 
 
 class TestCatalogParity:
