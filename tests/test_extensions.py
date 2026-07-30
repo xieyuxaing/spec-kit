@@ -576,7 +576,7 @@ class TestExtensionManifest:
         with open(manifest_path, 'w') as f:
             yaml.dump(valid_manifest_data, f)
 
-        with pytest.raises(ValidationError, match="must provide at least one command or hook"):
+        with pytest.raises(ValidationError, match="must provide at least one command, hook, or event"):
             ExtensionManifest(manifest_path)
 
     def test_hooks_only_extension(self, temp_dir, valid_manifest_data):
@@ -612,6 +612,67 @@ class TestExtensionManifest:
             yaml.dump(valid_manifest_data, f)
 
         with pytest.raises(ValidationError, match="Invalid provides.commands"):
+            ExtensionManifest(manifest_path)
+
+    @pytest.mark.parametrize("section", ["extension", "requires", "provides"])
+    @pytest.mark.parametrize("bad", [None, [], "text"])
+    def test_required_section_not_mapping_rejected(
+        self, temp_dir, valid_manifest_data, section, bad
+    ):
+        """A required section that is written but empty or wrongly shaped must
+        raise ValidationError, not a raw TypeError/AttributeError.
+
+        REQUIRED_FIELDS only checks key presence, so `provides:` with no value
+        passed it and then hit `None.get(...)`. That AttributeError escaped
+        list_installed()'s ValidationError-only "Corrupted extension" fallback,
+        so one bad extension made `specify extension list` exit 1 instead of
+        listing the others.
+        """
+        import yaml
+
+        valid_manifest_data[section] = bad
+
+        manifest_path = temp_dir / "extension.yml"
+        with open(manifest_path, 'w') as f:
+            yaml.dump(valid_manifest_data, f)
+
+        with pytest.raises(ValidationError, match=f"Invalid {section}"):
+            ExtensionManifest(manifest_path)
+
+    def test_empty_provides_mapping_is_still_accepted_with_hooks(
+        self, temp_dir, valid_manifest_data
+    ):
+        """Regression guard: `provides: {}` is a well-SHAPED mapping, so the new
+        shape check must not reject it — an extension may provide only hooks."""
+        import yaml
+
+        valid_manifest_data["provides"] = {}
+        assert valid_manifest_data.get("hooks"), "fixture is expected to define hooks"
+
+        manifest_path = temp_dir / "extension.yml"
+        with open(manifest_path, 'w') as f:
+            yaml.dump(valid_manifest_data, f)
+
+        ExtensionManifest(manifest_path)  # must not raise
+
+    def test_empty_provides_and_no_hooks_keeps_its_own_message(
+        self, temp_dir, valid_manifest_data
+    ):
+        """...and with no hooks (or events) either, it reports the "nothing
+        provided" message rather than the new shape error."""
+        import yaml
+
+        valid_manifest_data["provides"] = {}
+        valid_manifest_data.pop("hooks", None)
+        valid_manifest_data.pop("events", None)
+
+        manifest_path = temp_dir / "extension.yml"
+        with open(manifest_path, 'w') as f:
+            yaml.dump(valid_manifest_data, f)
+
+        with pytest.raises(
+            ValidationError, match="at least one command, hook, or event"
+        ):
             ExtensionManifest(manifest_path)
 
     def test_hooks_not_dict_rejected(self, temp_dir, valid_manifest_data):
@@ -2661,6 +2722,36 @@ Real body starts here.
         parsed = tomllib.loads(output)
 
         assert parsed["description"] == "first line\nsecond line\n"
+
+    @pytest.mark.parametrize(
+        ("description", "expected"),
+        [
+            (None, ""),                    # "description:" with no value
+            (42, "42"),                    # unquoted number
+            (True, "True"),                # unquoted boolean
+            (["a", "b"], "['a', 'b']"),    # was silently concatenated to "ab"
+        ],
+    )
+    def test_render_toml_command_coerces_non_string_description(
+        self, description, expected
+    ):
+        """Frontmatter comes from yaml.safe_load, so description can be any type.
+
+        _render_basic_toml_string iterates the value and calls ord() per
+        character, so a non-string raised a raw TypeError and a list of
+        single-character items was silently concatenated into a wrong value.
+        render_yaml_command (same class) already coerces; this brings the TOML
+        branch to parity.
+        """
+        from specify_cli.agents import CommandRegistrar as AgentCommandRegistrar
+
+        registrar = AgentCommandRegistrar()
+        output = registrar.render_toml_command(
+            {"description": description}, "body", "extension:test-ext"
+        )
+
+        parsed = tomllib.loads(output)
+        assert parsed["description"] == expected
 
     def test_render_toml_command_escapes_control_characters(self):
         """Control characters and a lone CR must be escaped so the TOML parses.
