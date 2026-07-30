@@ -2826,6 +2826,80 @@ class TestPresetCatalogMultiCatalog:
         assert "https://example.com/[cat].json" in result.output
         assert "desc [with] brackets" in result.output
 
+    def test_catalog_add_escapes_rich_markup(self, project_dir):
+        """`preset catalog add` must not parse the name/url as Rich markup.
+
+        An unbalanced closing tag raised MarkupError *after* the entry was
+        already written to preset-catalogs.yml, so the user saw a traceback
+        and no confirmation for a catalog that had in fact been added.
+        """
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+        from specify_cli import app
+
+        name = "[/red]my-catalog"
+        url = "https://example.com/[bold]c.json"
+        runner = CliRunner()
+        with patch.object(Path, "cwd", return_value=project_dir):
+            result = runner.invoke(
+                app, ["preset", "catalog", "add", url, "--name", name]
+            )
+        assert result.exit_code == 0, result.output
+        # Rendered verbatim, not swallowed as markup.
+        assert name in result.output
+        assert url in result.output
+        # Only rendering is escaped: the raw values still round-trip to disk.
+        config = yaml.safe_load(
+            (project_dir / ".specify" / "preset-catalogs.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert config["catalogs"][0]["name"] == name
+        assert config["catalogs"][0]["url"] == url
+
+    def test_catalog_remove_escapes_rich_markup(self, project_dir):
+        """`preset catalog remove` must not parse the name as Rich markup."""
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+        from specify_cli import app
+
+        name = "[/red]my-catalog"
+        (project_dir / ".specify" / "preset-catalogs.yml").write_text(
+            yaml.dump({
+                "catalogs": [
+                    {
+                        "name": name,
+                        "url": "https://example.com/c.json",
+                        "priority": 1,
+                        "install_allowed": False,
+                    }
+                ]
+            }),
+            encoding="utf-8",
+        )
+        runner = CliRunner()
+        with patch.object(Path, "cwd", return_value=project_dir):
+            result = runner.invoke(app, ["preset", "catalog", "remove", name])
+        assert result.exit_code == 0, result.output
+        assert name in result.output
+
+    def test_catalog_remove_escapes_markup_in_not_found_error(self, project_dir):
+        """The not-found error path renders the name too."""
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+        from specify_cli import app
+
+        (project_dir / ".specify" / "preset-catalogs.yml").write_text(
+            yaml.dump({"catalogs": []}), encoding="utf-8"
+        )
+        runner = CliRunner()
+        with patch.object(Path, "cwd", return_value=project_dir):
+            result = runner.invoke(
+                app, ["preset", "catalog", "remove", "[/red]absent"]
+            )
+        assert result.exit_code == 1
+        assert "[/red]absent" in result.output
+
     def test_env_var_overrides_catalogs(self, project_dir, monkeypatch):
         """Test that SPECKIT_PRESET_CATALOG_URL env var overrides defaults."""
         monkeypatch.setenv(
@@ -12209,3 +12283,213 @@ class TestPresetCatalogRichMarkup:
         ):
             value = self.MARKUP_PRESET[field]
             assert value in output
+        # Tags are joined into a single line, so assert on the rendered join.
+        assert ", ".join(self.MARKUP_PRESET["tags"]) in output
+
+
+class TestInstalledPresetRichMarkup:
+    """Locally installed preset metadata must render as literal text.
+
+    ``preset.yml`` is user-editable, so its fields can contain ``[...]``.
+    ``TestPresetCatalogRichMarkup`` covers the catalog branch of these
+    commands; the installed-preset branch of ``preset list``/``preset info``
+    and all of ``preset resolve`` were left unescaped, so a field like
+    ``Does [stuff] nicely`` silently rendered as ``Does  nicely`` and an
+    unbalanced tag such as ``[/red]`` raised ``rich.errors.MarkupError``,
+    aborting the command with a traceback.
+    """
+
+    MARKUP_FIELDS = {
+        "name": "[green]Markup Name[/green]",
+        "version": "1.0.0",
+        "description": "[yellow]Markup Description[/yellow]",
+        "author": "[magenta]Markup Author[/magenta]",
+        "repository": "[bold]Markup Repository[/bold]",
+        "license": "[cyan]Markup License[/cyan]",
+    }
+
+    def _install(self, temp_dir, project_dir, preset_overrides=None, strategy=None,
+                 pack_id="markup-pack", priority=10, tmpl_description=None):
+        """Install a preset from a directory built with the given manifest fields."""
+        from specify_cli.presets import PresetManager
+
+        src = temp_dir / f"src-{pack_id}"
+        (src / "templates").mkdir(parents=True)
+        (src / "templates" / "spec-template.md").write_text("# tmpl\n")
+
+        preset_section = {
+            "id": pack_id,
+            "name": pack_id,
+            "version": "1.0.0",
+            "description": "plain description",
+        }
+        preset_section.update(preset_overrides or {})
+        tmpl = {
+            "type": "template",
+            "name": "spec-template",
+            "file": "templates/spec-template.md",
+        }
+        if tmpl_description is not None:
+            tmpl["description"] = tmpl_description
+        if strategy:
+            tmpl["strategy"] = strategy
+        (src / "preset.yml").write_text(yaml.dump({
+            "schema_version": "1.0",
+            "preset": preset_section,
+            "requires": {"speckit_version": ">=0.0.1"},
+            "provides": {"templates": [tmpl]},
+            "tags": ["[italic]markup-tag[/italic]"],
+        }))
+
+        manager = PresetManager(project_dir)
+        manager.install_from_directory(src, "9.9.9", priority)
+        return manager
+
+    def _invoke(self, project_dir, args):
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+        from specify_cli import app
+
+        with patch.object(Path, "cwd", return_value=project_dir):
+            return CliRunner().invoke(app, args)
+
+    def test_list_and_info_escape_installed_markup(self, temp_dir, project_dir):
+        """Every ``preset.yml`` field must survive verbatim in list/info output."""
+        self._install(temp_dir, project_dir, preset_overrides=self.MARKUP_FIELDS)
+
+        for args in (["preset", "list"], ["preset", "info", "markup-pack"]):
+            result = self._invoke(project_dir, args)
+            assert result.exit_code == 0, result.output
+            output = " ".join(strip_ansi(result.output).split())
+            # `preset list` does not render repository/license.
+            fields = ("name", "description") if args[1] == "list" else self.MARKUP_FIELDS
+            for field in fields:
+                assert self.MARKUP_FIELDS[field] in output, (field, args, output)
+            assert "[italic]markup-tag[/italic]" in output, (args, output)
+
+    def test_info_does_not_swallow_template_description(self, temp_dir, project_dir):
+        """The per-template line in ``preset info`` must escape the template description.
+
+        ``name``/``type`` are format-restricted by manifest validation, but
+        ``description`` is free-form, so it is the field that can carry markup.
+        """
+        self._install(
+            temp_dir,
+            project_dir,
+            tmpl_description="Template [desc] here",
+        )
+        result = self._invoke(project_dir, ["preset", "info", "markup-pack"])
+        assert result.exit_code == 0, result.output
+        output = " ".join(strip_ansi(result.output).split())
+        assert "spec-template (template): Template [desc] here" in output, output
+
+    def test_unbalanced_markup_does_not_crash_list_or_info(self, temp_dir, project_dir):
+        """An unbalanced tag must not raise MarkupError and abort the command."""
+        self._install(
+            temp_dir,
+            project_dir,
+            preset_overrides={"description": "Broken [/red] tag"},
+        )
+
+        for args in (["preset", "list"], ["preset", "info", "markup-pack"]):
+            result = self._invoke(project_dir, args)
+            assert result.exit_code == 0, (args, result.output, result.exception)
+            assert "Broken [/red] tag" in strip_ansi(result.output)
+
+    def test_resolve_escapes_template_name(self, project_dir):
+        """``preset resolve`` echoes its argument; an unbalanced tag must not crash."""
+        result = self._invoke(project_dir, ["preset", "resolve", "no[/red]such"])
+        assert result.exit_code == 0, (result.output, result.exception)
+        assert "no[/red]such" in strip_ansi(result.output)
+
+    def test_resolve_escapes_layer_path_and_source(self, project_dir):
+        """The top-layer path/source lines must render markup literally.
+
+        A preset can be installed from any directory, so the resolved path can
+        contain ``[...]``; the layer source carries the pack id and version.
+        """
+        from unittest.mock import patch
+        from specify_cli.presets import PresetResolver
+
+        # A closing tag cannot live inside a path segment: `Path` treats its
+        # `/` as a separator on POSIX and rewrites it to `\` on Windows. The
+        # opening tag covers the swallowing case for the path; the unbalanced
+        # closing tag rides on `source`, which is a plain string.
+        layer = {
+            "path": Path("/tmp/[red]dir/spec-template.md"),
+            "source": "pack [/red] v1.0.0",
+            "strategy": "replace",
+        }
+        with patch.object(PresetResolver, "collect_all_layers", return_value=[layer]):
+            result = self._invoke(project_dir, ["preset", "resolve", "spec-template"])
+
+        assert result.exit_code == 0, (result.output, result.exception)
+        output = " ".join(strip_ansi(result.output).split())
+        assert "[red]dir" in output, output
+        assert "pack [/red] v1.0.0" in output, output
+
+    def test_resolve_escapes_fallback_path_and_source(self, project_dir):
+        """The no-layer fallback branch must escape ``resolve_with_source`` output."""
+        from unittest.mock import patch
+        from specify_cli.presets import PresetResolver
+
+        with patch.object(
+            PresetResolver, "collect_all_layers", return_value=[]
+        ), patch.object(
+            PresetResolver,
+            "resolve_with_source",
+            return_value={
+                "path": "/tmp/[blue]fallback[/blue]/spec-template.md",
+                "source": "fallback [/red] source",
+            },
+        ):
+            result = self._invoke(project_dir, ["preset", "resolve", "spec-template"])
+
+        assert result.exit_code == 0, (result.output, result.exception)
+        output = " ".join(strip_ansi(result.output).split())
+        assert "[blue]fallback[/blue]" in output, output
+        assert "fallback [/red] source" in output, output
+
+    def test_resolve_escapes_composition_error(self, project_dir):
+        """A composition exception message must not be parsed as markup."""
+        from unittest.mock import patch
+        from specify_cli.presets import PresetResolver
+
+        layers = [
+            {
+                "path": Path("/tmp/top/spec-template.md"),
+                "source": "top-pack v1.0.0",
+                "strategy": "append",
+            },
+            {
+                "path": Path("/tmp/base/spec-template.md"),
+                "source": "base-pack v1.0.0",
+                "strategy": "append",
+            },
+        ]
+        with patch.object(
+            PresetResolver, "collect_all_layers", return_value=layers
+        ), patch.object(
+            PresetResolver,
+            "resolve_content",
+            side_effect=RuntimeError("compose failed: [/red] bad layer"),
+        ):
+            result = self._invoke(project_dir, ["preset", "resolve", "spec-template"])
+
+        assert result.exit_code == 0, (result.output, result.exception)
+        output = " ".join(strip_ansi(result.output).split())
+        assert "compose failed: [/red] bad layer" in output, output
+
+    def test_resolve_renders_composition_strategy_labels(self, temp_dir, project_dir):
+        """The composition chain's ``[<strategy>]`` label must not be eaten as a tag."""
+        self._install(temp_dir, project_dir, strategy="replace",
+                      pack_id="base-pack", priority=20)
+        self._install(temp_dir, project_dir, strategy="append",
+                      pack_id="app-pack", priority=5)
+
+        result = self._invoke(project_dir, ["preset", "resolve", "spec-template"])
+        assert result.exit_code == 0, (result.output, result.exception)
+        output = strip_ansi(result.output)
+        assert "Composition chain" in output, output
+        assert "[base]" in output, output
+        assert "[append]" in output, output

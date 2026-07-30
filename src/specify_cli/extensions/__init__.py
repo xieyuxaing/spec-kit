@@ -263,8 +263,25 @@ class ExtensionManifest:
                 f"(expected {self.SCHEMA_VERSION})"
             )
 
+        # The REQUIRED_FIELDS loop above only checks key PRESENCE, so a section
+        # that is written but left empty (``provides:`` -> None) or given the
+        # wrong shape (``provides: []``) passes it and then fails on first use:
+        # ``field not in None`` raises TypeError and ``None.get(...)`` raises
+        # AttributeError. Neither is a ValidationError, so both escape the
+        # callers that already handle malformed manifests -- list_installed()'s
+        # "Corrupted extension" fallback catches ValidationError only, so one bad
+        # extension made ``specify extension list`` exit 1 with a raw
+        # AttributeError instead of listing the rest. Guard each required
+        # section's shape, mirroring the nested guards below ("Invalid
+        # provides.commands: expected a list", "Invalid hooks: expected a
+        # mapping") and _load_yaml's document-root check.
+
         # Validate extension metadata
         ext = self.data["extension"]
+        if not isinstance(ext, dict):
+            raise ValidationError(
+                f"Invalid extension: expected a mapping, got {type(ext).__name__}"
+            )
         for field in ["id", "name", "version", "description"]:
             if field not in ext:
                 raise ValidationError(f"Missing extension.{field}")
@@ -299,24 +316,37 @@ class ExtensionManifest:
 
         # Validate requires section
         requires = self.data["requires"]
+        if not isinstance(requires, dict):
+            raise ValidationError(
+                f"Invalid requires: expected a mapping, got {type(requires).__name__}"
+            )
         if "speckit_version" not in requires:
             raise ValidationError("Missing requires.speckit_version")
 
         # Validate provides section
         provides = self.data["provides"]
+        if not isinstance(provides, dict):
+            raise ValidationError(
+                f"Invalid provides: expected a mapping, got {type(provides).__name__}"
+            )
         commands = provides.get("commands", [])
         hooks = self.data.get("hooks")
+        events = self.data.get("events")
 
         if "commands" in provides and not isinstance(commands, list):
             raise ValidationError("Invalid provides.commands: expected a list")
         if "hooks" in self.data and not isinstance(hooks, dict):
             raise ValidationError("Invalid hooks: expected a mapping")
+        if "events" in self.data:
+            from ..events import validate_events
+            validate_events(self.data)
 
         has_commands = bool(commands)
         has_hooks = bool(hooks)
+        has_events = bool(events)
 
-        if not has_commands and not has_hooks:
-            raise ValidationError("Extension must provide at least one command or hook")
+        if not has_commands and not has_hooks and not has_events:
+            raise ValidationError("Extension must provide at least one command, hook, or event")
 
         # Validate hook values (if present).
         # Each event is a single mapping or a list of mappings.
@@ -440,6 +470,33 @@ class ExtensionManifest:
                         f"The extension author should update the manifest."
                     )
 
+        # C11: apply the same rename + alias-lift canonicalization to event
+        # command references. Without this, an event referencing a command
+        # that was auto-corrected (e.g. speckit.boot -> speckit.<id>.boot)
+        # keeps the obsolete name, dispatch reports no command, and the event
+        # silently no-ops.
+        events_data = self.data.get("events", {})
+        if isinstance(events_data, dict):
+            for event_name, event_config in events_data.items():
+                if not isinstance(event_config, dict):
+                    continue
+                command_ref = event_config.get("command")
+                if not isinstance(command_ref, str):
+                    continue
+                after_rename = rename_map.get(command_ref, command_ref)
+                parts = after_rename.split(".")
+                if len(parts) == 2 and parts[0] == ext["id"]:
+                    final_ref = f"speckit.{ext['id']}.{parts[1]}"
+                else:
+                    final_ref = after_rename
+                if final_ref != command_ref:
+                    event_config["command"] = final_ref
+                    self.warnings.append(
+                        f"Event '{event_name}' referenced command '{command_ref}'; "
+                        f"updated to canonical form '{final_ref}'. "
+                        f"The extension author should update the manifest."
+                    )
+
     @staticmethod
     def _try_correct_command_name(name: str, ext_id: str) -> Optional[str]:
         """Try to auto-correct a non-conforming command name to the required pattern.
@@ -535,7 +592,7 @@ class ExtensionRegistry:
             return {"schema_version": self.SCHEMA_VERSION, "extensions": {}}
 
         try:
-            with open(self.registry_path, "r") as f:
+            with open(self.registry_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             # Validate loaded data is a dict (handles corrupted registry files)
             if not isinstance(data, dict):
@@ -551,7 +608,7 @@ class ExtensionRegistry:
     def _save(self):
         """Save registry to disk."""
         self.extensions_dir.mkdir(parents=True, exist_ok=True)
-        with open(self.registry_path, "w") as f:
+        with open(self.registry_path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=2)
 
     def add(self, extension_id: str, metadata: dict):
@@ -1267,6 +1324,7 @@ class ExtensionManager:
         manifest: ExtensionManifest,
         extension_dir: Path,
         link_outputs: bool = False,
+        force: bool = False,
     ) -> List[str]:
         """Generate SKILL.md files for extension commands as agent skills.
 
@@ -1280,6 +1338,11 @@ class ExtensionManager:
             extension_dir: Installed extension directory.
             link_outputs: If True, create dev-mode symlinks for rendered
                 skill files when supported by the OS.
+            force: If True, overwrite existing SKILL.md files even when they
+                are not dev-mode symlinks.  Use in the upgrade path, where
+                ``setup()`` has just freshly regenerated core-template skill
+                files and the skip guard would otherwise prevent extension
+                content from being layered on top.
 
         Returns:
             List of skill names that were created (for registry storage).
@@ -1367,13 +1430,16 @@ class ExtensionManager:
                 )
                 # Do not overwrite user-customized skills, but allow dev-mode
                 # symlinks that point back to this extension's generated cache
-                # to be refreshed on a subsequent dev install.
-                if not is_expected_dev_symlink:
+                # to be refreshed on a subsequent dev install.  In the upgrade
+                # path (force=True) the file was just written by setup(), so
+                # overwriting it with the composed extension content is correct.
+                if not is_expected_dev_symlink and not force:
                     continue
-            elif skill_dir_preexists:
+            elif skill_dir_preexists and not force:
                 # Never add files to a pre-existing user directory. Without a
                 # verifiable SKILL.md ownership marker, rollback/removal cannot
                 # distinguish our output from unrelated user artifacts.
+                # Skipped when force=True (upgrade path).
                 continue
 
             # Create skill directory; track whether we created it so we can clean
@@ -2612,7 +2678,7 @@ class ExtensionManager:
             if updates:
                 self.registry.update(ext_id, updates)
 
-    def register_enabled_extensions_for_agent(self, agent_name: str) -> None:
+    def register_enabled_extensions_for_agent(self, agent_name: str, *, force: bool = False) -> None:
         """Register installed, enabled extensions for ``agent_name``.
 
         Command-file registration is scoped to the explicit ``agent_name``
@@ -2730,7 +2796,7 @@ class ExtensionManager:
                 if agent_name == active_agent:
                     try:
                         registered_skills = self._register_extension_skills(
-                            manifest, ext_dir
+                            manifest, ext_dir, force=force
                         )
                     except Exception as skills_err:
                         # Skills are a companion artifact.  If command registration
@@ -3829,10 +3895,8 @@ class ExtensionCatalog(CatalogStackBase):
 
     def clear_cache(self):
         """Clear the catalog cache (both legacy and URL-hash-based files)."""
-        if self.cache_file.exists():
-            self.cache_file.unlink()
-        if self.cache_metadata_file.exists():
-            self.cache_metadata_file.unlink()
+        self.cache_file.unlink(missing_ok=True)
+        self.cache_metadata_file.unlink(missing_ok=True)
         # Also clear any per-URL hash-based cache files
         if self.cache_dir.exists():
             for extra_cache in self.cache_dir.glob("catalog-*.json"):
